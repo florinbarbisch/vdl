@@ -12,4 +12,4 @@ mkdir -p logs
 mkdir -p checkpoints
 
 # Run training script
-.venv/bin/python src/train.py --model show_tell --debug overfit
+.venv/bin/python src/train.py --model show_tell
