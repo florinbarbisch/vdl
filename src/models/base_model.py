@@ -60,7 +60,7 @@ class BaseImageCaptioning(pl.LightningModule):
                 break
             if token >= 4:  # Skip special tokens
                 words.append(self.id_to_word[token])
-        return " ".join(words)
+        return words
         
     def create_attention_grid(self, image: np.ndarray, caption: List[int], attention_maps: torch.Tensor) -> np.ndarray:
         """Create a grid of attention maps for each word."""
@@ -210,7 +210,7 @@ class BaseImageCaptioning(pl.LightningModule):
             image = np.clip(image, 0, 1)
             
             # Format caption text with generated and original captions
-            caption_text = f"Generated: {self.tokens_to_words(gen_caption)}\n\nOriginal captions:\n"
+            caption_text = f"Generated: {" ".join(self.tokens_to_words(gen_caption))}\n\nOriginal captions:\n"
             for i, orig_cap in enumerate(orig_captions, 1):
                 caption_text += f"{i}. {orig_cap}\n"
             
