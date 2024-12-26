@@ -95,8 +95,8 @@ def main(args):
     # Add debug configurations
     if args.debug == "overfit":
         trainer_kwargs.update({
-            'overfit_batches': 0.01,  # Use 1% of training data
-            'max_epochs': 100,  # Increase epochs for overfitting
+            'overfit_batches': 1,  # Use 1 batch of training data
+            'max_epochs': 1000,  # Increase epochs for overfitting
             'val_check_interval': 1.0  # Validate after each epoch
         })
     elif args.debug == "fast":
