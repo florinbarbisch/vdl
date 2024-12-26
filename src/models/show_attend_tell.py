@@ -216,5 +216,15 @@ class ShowAttendTell(BaseImageCaptioning):
                 all_attention_weights.append(torch.stack(attention_weights))
         
         if return_attention:
-            return captions, torch.stack(all_attention_weights)
+            # Pad attention weights to max length
+            max_len = max(weights.size(0) for weights in all_attention_weights)
+            padded_weights = []
+            for weights in all_attention_weights:
+                curr_len = weights.size(0)
+                if curr_len < max_len:
+                    padding = torch.zeros((max_len - curr_len,) + weights.shape[1:], device=weights.device)
+                    padded_weights.append(torch.cat([weights, padding]))
+                else:
+                    padded_weights.append(weights)
+            return captions, torch.stack(padded_weights)
         return captions 
