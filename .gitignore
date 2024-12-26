@@ -176,3 +176,9 @@ cython_debug/
 
 # snakeviz
 *.prof
+
+# pytorch lightning
+lightning_logs/
+
+# wandb
+wandb/
