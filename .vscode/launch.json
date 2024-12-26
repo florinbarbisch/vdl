@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Train Show-Tell Model",
+            "name": "Python Debugger: Overfit Show-Tell Model",
             "type": "debugpy",
             "request": "launch",
             "program": "src/train.py",
@@ -13,12 +13,20 @@
             "args": ["--model", "show_tell", "--debug", "overfit"]
         },
         {
-            "name": "Python Debugger: Train Show-Attend-Tell Model",
+            "name": "Python Debugger: Overfit Show-Attend-Tell Model",
             "type": "debugpy",
             "request": "launch",
             "program": "src/train.py",
             "console": "integratedTerminal",
             "args": ["--model", "show_attend_tell", "--debug", "overfit"]
+        }
+        {
+            "name": "Python Debugger: Train Show-Attend-Tell Model",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/train.py",
+            "console": "integratedTerminal",
+            "args": ["--model", "show_attend_tell"]
         }
     ]
 }
