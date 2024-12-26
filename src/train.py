@@ -30,13 +30,13 @@ def main(args):
     
     # Data loading
     train_dataset = Flickr8kDataset(
-        image_dir=os.path.join(DATA_DIR, 'images'),
+        image_dir=os.path.join(DATA_DIR, 'Images'),
         captions_file=os.path.join(DATA_DIR, 'captions.txt'),
         split='train'
     )
     
     val_dataset = Flickr8kDataset(
-        image_dir=os.path.join(DATA_DIR, 'images'),
+        image_dir=os.path.join(DATA_DIR, 'Images'),
         captions_file=os.path.join(DATA_DIR, 'captions.txt'),
         split='val'
     )

@@ -9,7 +9,7 @@ def download_dataset():
     os.makedirs(data_dir, exist_ok=True)
     
     captions_file = os.path.join(data_dir, "captions.txt")
-    images_dir = os.path.join(data_dir, "images")
+    images_dir = os.path.join(data_dir, "Images")
     
     if not os.path.exists(captions_file) and (not os.path.exists(images_dir) or not any(f.endswith('.jpg') for f in os.listdir(images_dir) if os.path.isfile(os.path.join(images_dir, f)))):
         print("Downloading Flickr8k dataset...")
