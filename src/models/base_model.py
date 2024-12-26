@@ -87,7 +87,11 @@ class BaseImageCaptioning(pl.LightningModule):
             ).squeeze().detach().cpu().numpy()
             
             # Normalize attention
-            attn = (attn - attn.min()) / (attn.max() - attn.min())
+            attn_range = attn.max() - attn.min()
+            if attn_range > 0:
+                attn = (attn - attn.min()) / attn_range
+            else:
+                attn = np.zeros_like(attn)  # If max=min, set attention to zeros
             attn_colored = np.stack([attn, attn, attn], axis=-1)
             
             # Blend with original image
@@ -225,7 +229,8 @@ class BaseImageCaptioning(pl.LightningModule):
                 ).squeeze().detach().cpu().numpy()
                 
                 # Create grayscale heatmap for average attention
-                attn = (attn - attn.min()) / (attn.max() - attn.min())
+                attn_range = attn.max() - attn.min()
+                attn = (attn - attn.min()) / attn_range if attn_range > 0 else np.zeros_like(attn)
                 attn_colored = np.stack([attn, attn, attn], axis=-1)
                 
                 # Blend attention map with original image
