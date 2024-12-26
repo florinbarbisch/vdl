@@ -20,8 +20,11 @@ This project implements and compares two image captioning architectures:
 ```bash
 pip install -r requirements.txt
 ```
+2. Login to Kaggle:
+   - Download your kaggle.json from your Kaggle account settings
+   - Place it in `~/.kaggle/kaggle.json`
 
-2. Prepare the dataset:
+3. Prepare the dataset:
 ```bash
 python src/data/prepare_dataset.py
 ```
