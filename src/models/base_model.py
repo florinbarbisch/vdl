@@ -147,8 +147,7 @@ class BaseImageCaptioning(pl.LightningModule):
                     attn.unsqueeze(0).unsqueeze(0), 
                     size=image.shape[:2], 
                     mode='bilinear'
-                ).squeeze().cpu().numpy()
-                
+                ).squeeze().detach().cpu().numpy()
                 # Create a heatmap overlay
                 wandb_images.append(wandb.Image(
                     image,
