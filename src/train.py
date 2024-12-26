@@ -6,6 +6,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 import wandb
+from datetime import datetime
 
 from data.dataset import Flickr8kDataset, flickr8k_collate_fn
 from models.show_and_tell import ShowAndTell
@@ -17,8 +18,11 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 def main(args):
     # Initialize wandb (disable for debug modes)
     if not args.debug:
-        wandb.init(project="image-captioning-comparison", name=args.model)
-        wandb_logger = WandbLogger()
+        # Create a unique name with timestamp and model
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_name = f"{args.model}_{timestamp}"
+        wandb.init(project="image-captioning-comparison", name=run_name)
+        wandb_logger = WandbLogger(name=run_name, version=run_name)
     else:
         wandb_logger = None
     
@@ -89,7 +93,8 @@ def main(args):
         'devices': 1,
         'callbacks': callbacks,
         'logger': wandb_logger,
-        'gradient_clip_val': args.grad_clip
+        'gradient_clip_val': args.grad_clip,
+        'default_root_dir': f"lightning_logs/{run_name}" if not args.debug else None
     }
     
     # Add debug configurations
