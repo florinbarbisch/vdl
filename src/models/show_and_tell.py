@@ -13,25 +13,28 @@ class ShowAndTell(BaseImageCaptioning):
         
     def forward(self, images: torch.Tensor, captions: torch.Tensor) -> torch.Tensor:
         """Forward pass for training."""
+        batch_size = images.size(0)
+        
         # Extract image features
         features = self.encode_images(images)  # (batch_size, embed_size)
         
-        # Embed captions
-        embeddings = self.embed(captions[:, :-1])  # Exclude last token (<end>)
+        # Embed captions (exclude last token)
+        embeddings = self.embed(captions[:, :-1])  # (batch_size, seq_len-1, embed_size)
         
         # Concatenate image features with caption embeddings
-        inputs = torch.cat((features.unsqueeze(1), embeddings), dim=1)
+        inputs = torch.cat((features.unsqueeze(1), embeddings), dim=1)  # (batch_size, seq_len, embed_size)
         
         # LSTM forward pass
-        lstm_out, _ = self.lstm(inputs)
-        outputs = self.linear(lstm_out)
+        lstm_out, _ = self.lstm(inputs)  # (batch_size, seq_len, hidden_size)
+        outputs = self.linear(lstm_out)  # (batch_size, seq_len, vocab_size)
         
         # Calculate cross entropy loss
-        targets = captions[:, 1:]  # Exclude first token (<start>)
-        loss = nn.CrossEntropyLoss()(
-            outputs.reshape(-1, self.vocab_size),
-            targets.reshape(-1)
-        )
+        # Reshape outputs to (batch_size * seq_len, vocab_size)
+        outputs = outputs.reshape(-1, self.vocab_size)
+        # Use targets starting from the second token (exclude <start>)
+        targets = captions[:, 1:].reshape(-1)
+        
+        loss = nn.CrossEntropyLoss(ignore_index=0)(outputs, targets)
         
         return loss
     
