@@ -84,7 +84,7 @@ class BaseImageCaptioning(pl.LightningModule):
                 attn.unsqueeze(0).unsqueeze(0),
                 size=image.shape[:2],
                 mode='bilinear'
-            ).squeeze().cpu().numpy()
+            ).squeeze().detach().cpu().numpy()
             
             # Normalize attention
             attn = (attn - attn.min()) / (attn.max() - attn.min())
@@ -106,8 +106,7 @@ class BaseImageCaptioning(pl.LightningModule):
         fig.canvas.draw()
         
         # Convert figure to numpy array
-        data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-        data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        data = np.asarray(fig.canvas.buffer_rgba())[:, :, :3]
         
         plt.close(fig)
         return data / 255.0
