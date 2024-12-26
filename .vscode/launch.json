@@ -10,7 +10,15 @@
             "request": "launch",
             "program": "src/train.py",
             "console": "integratedTerminal",
-            "args": ["--model", "show_tell", "--debug", "fast"]
+            "args": ["--model", "show_tell", "--debug", "overfit"]
+        },
+        {
+            "name": "Python Debugger: Train Show-Attend-Tell Model",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/train.py",
+            "console": "integratedTerminal",
+            "args": ["--model", "show_attend_tell", "--debug", "overfit"]
         }
     ]
 }
