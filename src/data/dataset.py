@@ -11,14 +11,15 @@ def flickr8k_collate_fn(batch):
     """Collate function to handle variable length sequences.
     
     Args:
-        batch: List of tuples (image, caption)
+        batch: List of tuples (image, caption, all_captions)
         
     Returns:
         images: Tensor of shape (batch_size, 3, 224, 224)
         captions: Padded tensor of shape (batch_size, max_length)
+        all_captions: List of lists containing all 5 captions for each image
     """
-    # Separate images and captions
-    images, captions = zip(*batch)
+    # Separate images, captions and all_captions
+    images, captions, all_captions = zip(*batch)
     
     # Stack images
     images = torch.stack(images, 0)
@@ -26,7 +27,7 @@ def flickr8k_collate_fn(batch):
     # Pad captions
     captions = pad_sequence(captions, batch_first=True, padding_value=0)
     
-    return images, captions
+    return images, captions, list(all_captions)
 
 class Flickr8kDataset(Dataset):
     def __init__(self, 
@@ -87,21 +88,20 @@ class Flickr8kDataset(Dataset):
     def __len__(self) -> int:
         return len(self.image_filenames)
     
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, List[str]]:
         # Load image
         image_path = os.path.join(self.image_dir, self.image_filenames[idx])
         image = Image.open(image_path).convert('RGB')
         if self.transform:
             image = self.transform(image)
         
+        # Get all captions for this image
+        all_captions = self.image_to_captions[self.image_filenames[idx]]
+        
         # Process caption (use first caption for training)
         caption = self._process_caption(self.captions[idx])
         
-        return image, caption
-    
-    def get_all_captions(self, image_filename: str) -> List[str]:
-        """Get all 5 captions for a given image filename."""
-        return self.image_to_captions.get(image_filename, [])
+        return image, caption, all_captions
     
     @property
     def vocab_size(self) -> int:

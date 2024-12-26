@@ -122,8 +122,8 @@ class BaseImageCaptioning(pl.LightningModule):
         optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.parameters()))
         return optimizer
     
-    def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> Dict:
-        images, captions = batch
+    def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor, List[List[str]]], batch_idx: int) -> Dict:
+        images, captions, original_captions = batch
         loss = self.forward(images, captions)
         
         # Log training loss
@@ -135,12 +135,12 @@ class BaseImageCaptioning(pl.LightningModule):
         
         if is_overfit and batch_idx == 0:
             generated_captions = self.generate_caption(images)
-            self.log_images_and_captions(images, generated_captions, prefix="train")
+            self.log_images_and_captions(images, generated_captions, original_captions, prefix="train")
         
         return {'loss': loss}
     
-    def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> Dict:
-        images, captions = batch
+    def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor, List[List[str]]], batch_idx: int) -> Dict:
+        images, captions, original_captions = batch
         loss = self.forward(images, captions)
         
         # Generate captions for BLEU score calculation
@@ -153,7 +153,7 @@ class BaseImageCaptioning(pl.LightningModule):
         is_overfit = trainer.overfit_batches > 0
         
         if (is_overfit and batch_idx == 0) or (not is_overfit and batch_idx % 100 == 0):
-            self.log_images_and_captions(images, generated_captions, prefix="val")
+            self.log_images_and_captions(images, generated_captions, original_captions, prefix="val")
         
         # Store outputs for epoch end
         self.validation_step_outputs.append({
@@ -193,8 +193,8 @@ class BaseImageCaptioning(pl.LightningModule):
         """To be implemented by subclasses."""
         raise NotImplementedError 
     
-    def log_images_and_captions(self, images: torch.Tensor, captions: list, attention_maps: torch.Tensor = None, 
-                               max_images: int = 4, prefix: str = "val"):
+    def log_images_and_captions(self, images: torch.Tensor, generated_captions: list, original_captions: List[List[str]], 
+                               attention_maps: torch.Tensor = None, max_images: int = 4, prefix: str = "val"):
         """Log images and their generated captions to wandb."""
         if not self.logger:
             return
@@ -203,20 +203,15 @@ class BaseImageCaptioning(pl.LightningModule):
         images = self.inverse_transform(images[::8])  # Take every 8th image
         images = [img.cpu().numpy().transpose(1, 2, 0) for img in images]
         
-        # Get the dataset from the trainer
-        dataset = self.trainer.val_dataloaders.dataset if prefix == "val" else self.trainer.train_dataloaders.dataset
-        
         # Create wandb Image objects with captions
         wandb_images = []
-        for idx, (image, caption) in enumerate(zip(images, captions[::8])):  # Take every 8th caption
+        for idx, (image, gen_caption, orig_captions) in enumerate(zip(images, generated_captions[::8], original_captions[::8])):  # Take every 8th item
             # Clip values to [0,1] range
             image = np.clip(image, 0, 1)
             
-            # Get original captions for this image
-            image_filename = dataset.image_filenames[idx * 8]  # Account for the stride of 8
-            original_captions = dataset.get_all_captions(image_filename)
-            caption_text = f"Generated: {self.tokens_to_words(caption)}\n\nOriginal captions:\n"
-            for i, orig_cap in enumerate(original_captions, 1):
+            # Format caption text with generated and original captions
+            caption_text = f"Generated: {self.tokens_to_words(gen_caption)}\n\nOriginal captions:\n"
+            for i, orig_cap in enumerate(orig_captions, 1):
                 caption_text += f"{i}. {orig_cap}\n"
             
             if attention_maps is not None:
@@ -239,7 +234,7 @@ class BaseImageCaptioning(pl.LightningModule):
                 blended = np.clip(blended, 0, 1)
                 
                 # Create attention grid for individual words
-                attention_grid = self.create_attention_grid(image, caption, attention_maps[idx])
+                attention_grid = self.create_attention_grid(image, gen_caption, attention_maps[idx])
                 
                 # Log both average attention and per-word attention grid
                 wandb_images.extend([

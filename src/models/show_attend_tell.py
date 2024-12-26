@@ -123,8 +123,8 @@ class ShowAttendTell(BaseImageCaptioning):
         
         return loss
     
-    def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> Dict:
-        images, captions = batch
+    def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor, List[List[str]]], batch_idx: int) -> Dict:
+        images, captions, original_captions = batch
         loss = self.forward(images, captions)
         
         # Log training loss
@@ -136,12 +136,12 @@ class ShowAttendTell(BaseImageCaptioning):
         
         if is_overfit and batch_idx == 0:
             generated_captions, attention_maps = self.generate_caption(images, return_attention=True)
-            self.log_images_and_captions(images, generated_captions, attention_maps, prefix="train")
+            self.log_images_and_captions(images, generated_captions, original_captions, attention_maps, prefix="train")
         
         return {'loss': loss}
     
-    def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> Dict:
-        images, captions = batch
+    def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor, List[List[str]]], batch_idx: int) -> Dict:
+        images, captions, original_captions = batch
         loss = self.forward(images, captions)
         
         # Generate captions and get attention maps
@@ -154,7 +154,7 @@ class ShowAttendTell(BaseImageCaptioning):
         is_overfit = trainer.overfit_batches > 0
         
         if (is_overfit and batch_idx == 0) or (not is_overfit and batch_idx % 100 == 0):
-            self.log_images_and_captions(images, generated_captions, attention_maps, prefix="val")
+            self.log_images_and_captions(images, generated_captions, original_captions, attention_maps, prefix="val")
         
         # Store outputs for epoch end
         self.validation_step_outputs.append({
