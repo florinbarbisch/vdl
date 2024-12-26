@@ -32,7 +32,7 @@ class ShowAndTell(BaseImageCaptioning):
         # Reshape outputs to (batch_size * seq_len, vocab_size)
         outputs = outputs.reshape(-1, self.vocab_size)
         # Use targets starting from the second token (exclude <start>)
-        targets = captions[:, 1:].reshape(-1)
+        targets = captions.reshape(-1)
         
         loss = nn.CrossEntropyLoss(ignore_index=0)(outputs, targets)
         

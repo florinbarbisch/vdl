@@ -72,7 +72,7 @@ class BaseImageCaptioning(pl.LightningModule):
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
         
         # Calculate BLEU score
-        generated = [x['generated_captions'] for x in outputs]
+        generated = torch.Tensor([x['generated_captions'] for x in outputs])
         targets = [x['target_captions'] for x in outputs]
         bleu_score = corpus_bleu(targets, generated)
         

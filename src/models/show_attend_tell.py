@@ -110,7 +110,7 @@ class ShowAttendTell(BaseImageCaptioning):
             alphas[:, t] = alpha
         
         # Calculate loss
-        targets = captions[:, 1:]  # Exclude first token (<start>)
+        targets = captions
         
         # Cross entropy loss
         loss = nn.CrossEntropyLoss()(
