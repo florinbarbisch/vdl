@@ -2,11 +2,12 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 import torchvision.models as models
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 import wandb
 from nltk.translate.bleu_score import corpus_bleu
 import torchvision.transforms as transforms
 import numpy as np
+import matplotlib.pyplot as plt
 
 class BaseImageCaptioning(pl.LightningModule):
     def __init__(self, vocab_size: int, embed_size: int = 256, hidden_size: int = 512):
@@ -40,6 +41,76 @@ class BaseImageCaptioning(pl.LightningModule):
             transforms.Normalize(mean=[-0.485, -0.456, -0.406],
                               std=[1., 1., 1.]),
         ])
+        
+        # Initialize vocabulary (to be set by dataset)
+        self.id_to_word = None
+        
+    def set_vocabulary(self, vocab: dict):
+        """Set the vocabulary mapping."""
+        self.id_to_word = {v: k for k, v in vocab.items()}
+        
+    def tokens_to_words(self, tokens: List[int]) -> List[str]:
+        """Convert token IDs to words."""
+        if self.id_to_word is None:
+            raise ValueError("Vocabulary not set. Call set_vocabulary first.")
+            
+        words = []
+        for token in tokens:
+            if token == 2:  # <end> token
+                break
+            if token >= 4:  # Skip special tokens
+                words.append(self.id_to_word[token])
+        return words
+        
+    def create_attention_grid(self, image: np.ndarray, caption: List[int], attention_maps: torch.Tensor) -> np.ndarray:
+        """Create a grid of attention maps for each word."""
+        words = self.tokens_to_words(caption)
+        n_words = len(words)
+        
+        if n_words == 0:
+            return None
+            
+        # Calculate grid dimensions
+        n_cols = min(5, n_words)
+        n_rows = (n_words + n_cols - 1) // n_cols
+        
+        # Create figure
+        fig = plt.figure(figsize=(4*n_cols, 4*n_rows))
+        
+        for idx, (word, attn) in enumerate(zip(words, attention_maps[:n_words])):
+            # Process attention map
+            attn = attn.reshape(7, 7)
+            attn = torch.nn.functional.interpolate(
+                attn.unsqueeze(0).unsqueeze(0),
+                size=image.shape[:2],
+                mode='bilinear'
+            ).squeeze().cpu().numpy()
+            
+            # Normalize attention
+            attn = (attn - attn.min()) / (attn.max() - attn.min())
+            attn_colored = np.stack([attn, attn, attn], axis=-1)
+            
+            # Blend with original image
+            alpha = 0.7
+            blended = (1-alpha)*image + alpha*attn_colored
+            blended = np.clip(blended, 0, 1)
+            
+            # Add to grid
+            plt.subplot(n_rows, n_cols, idx + 1)
+            plt.imshow(blended)
+            plt.title(word, fontsize=12)
+            plt.axis('off')
+        
+        # Adjust layout and convert to numpy array
+        plt.tight_layout()
+        fig.canvas.draw()
+        
+        # Convert figure to numpy array
+        data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+        data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        
+        plt.close(fig)
+        return data / 255.0
         
     def encode_images(self, images: torch.Tensor) -> torch.Tensor:
         """Extract image features using CNN encoder."""
@@ -140,7 +211,7 @@ class BaseImageCaptioning(pl.LightningModule):
             image = np.clip(image, 0, 1)
             
             if attention_maps is not None:
-                # Get attention map for this image (use mean across words)
+                # Log average attention map
                 attn = attention_maps[idx].mean(0)  # Average attention across words
                 attn = attn.reshape(7, 7)  # Reshape to spatial dimensions
                 attn = torch.nn.functional.interpolate(
@@ -148,28 +219,26 @@ class BaseImageCaptioning(pl.LightningModule):
                     size=image.shape[:2], 
                     mode='bilinear'
                 ).squeeze().detach().cpu().numpy()
-                # from PIL import Image
-                # diff = attn.max() - attn.min()
-                # arr = (((attn - attn.min()) / diff) * 255).astype(np.uint8)
-                # im = Image.fromarray(arr)
-                # im.save("your_file.png")
-
-                # Create grayscale heatmap
+                
+                # Create grayscale heatmap for average attention
                 attn = (attn - attn.min()) / (attn.max() - attn.min())
-                attn_colored = np.stack([attn, attn, attn], axis=-1)  # Convert to 3 channel grayscale
+                attn_colored = np.stack([attn, attn, attn], axis=-1)
                 
                 # Blend attention map with original image
                 alpha = 0.8
                 blended = (1-alpha)*image + alpha*attn_colored
                 blended = np.clip(blended, 0, 1)
                 
-                # Log both the attention overlay and original with mask
-                wandb_images.append(wandb.Image(
-                    blended,
-                    caption=f"Generated (with attention overlay): {caption}"
-                ))
+                # Create attention grid for individual words
+                attention_grid = self.create_attention_grid(image, caption, attention_maps[idx])
+                
+                # Log both average attention and per-word attention grid
+                wandb_images.extend([
+                    wandb.Image(blended, caption=f"Generated (average attention): {self.tokens_to_words(caption)}"),
+                    wandb.Image(attention_grid, caption=f"Word-by-word attention") if attention_grid is not None else None
+                ])
             else:
-                wandb_images.append(wandb.Image(image, caption=f"Generated: {caption}"))
+                wandb_images.append(wandb.Image(image, caption=f"Generated: {self.tokens_to_words(caption)}"))
         
         # Log to wandb with prefix
         self.logger.experiment.log({f"{prefix}_samples": wandb_images}) 

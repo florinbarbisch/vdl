@@ -76,6 +76,9 @@ def main(args):
             attention_dim=args.attention_dim
         )
     
+    # Set vocabulary for caption conversion
+    model.set_vocabulary(train_dataset.vocab)
+    
     # Callbacks
     callbacks = []
     if not args.debug:
