@@ -7,7 +7,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 import wandb
 
-from data.dataset import Flickr8kDataset
+from data.dataset import Flickr8kDataset, flickr8k_collate_fn
 from models.show_and_tell import ShowAndTell
 from models.show_attend_tell import ShowAttendTell
 
@@ -40,7 +40,9 @@ def main(args):
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
-        pin_memory=True
+        pin_memory=True,
+        collate_fn=flickr8k_collate_fn,
+        persistent_workers=True
     )
     
     val_loader = DataLoader(
@@ -48,7 +50,9 @@ def main(args):
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
-        pin_memory=True
+        pin_memory=True,
+        collate_fn=flickr8k_collate_fn,
+        persistent_workers=True
     )
     
     # Model
