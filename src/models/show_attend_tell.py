@@ -110,12 +110,12 @@ class ShowAttendTell(BaseImageCaptioning):
             alphas[:, t] = alpha
         
         # Calculate loss
-        targets = captions
+        targets = captions[:, 1:max_decode_lengths + 1]  # Shift targets by 1 (predict next word)
         
-        # Cross entropy loss
-        loss = nn.CrossEntropyLoss()(
+        # Cross entropy loss with padding mask
+        loss = nn.CrossEntropyLoss(ignore_index=0)(  # ignore_index=0 to ignore padding
             predictions.reshape(-1, self.vocab_size),
-            targets[:, :max_decode_lengths].reshape(-1)
+            targets.reshape(-1)
         )
         
         # Add doubly stochastic attention regularization
@@ -153,7 +153,7 @@ class ShowAttendTell(BaseImageCaptioning):
         trainer = self.trainer
         is_overfit = trainer.overfit_batches > 0
         
-        if (is_overfit and batch_idx == 0) or (not is_overfit and batch_idx % 100 == 0):
+        if (is_overfit and batch_idx == 0) or (not is_overfit and batch_idx % 10 == 0):
             self.log_images_and_captions(images, generated_captions, original_captions, attention_maps, prefix="val")
         
         # Store outputs for epoch end
