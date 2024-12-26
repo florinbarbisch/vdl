@@ -16,11 +16,13 @@ from models.show_attend_tell import ShowAttendTell
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 
 def main(args):
-    # Initialize wandb (disable for debug modes)
-    if not args.debug:
+    # Initialize wandb (enable for overfit, disable for fast debug)
+    if args.debug != "fast":
         # Create a unique name with timestamp and model
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_name = f"{args.model}_{timestamp}"
+        if args.debug == "overfit":
+            run_name += "_overfit"
         wandb.init(project="image-captioning-comparison", name=run_name)
         wandb_logger = WandbLogger(name=run_name, version=run_name)
     else:

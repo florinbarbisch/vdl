@@ -59,6 +59,14 @@ class BaseImageCaptioning(pl.LightningModule):
         # Log training loss
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
         
+        # In overfit mode, log the first batch images and captions
+        trainer = self.trainer
+        is_overfit = trainer.overfit_batches > 0
+        
+        if is_overfit and batch_idx == 0:
+            generated_captions = self.generate_caption(images)
+            self.log_images_and_captions(images, generated_captions, prefix="train")
+        
         return {'loss': loss}
     
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> Dict:
@@ -68,9 +76,14 @@ class BaseImageCaptioning(pl.LightningModule):
         # Generate captions for BLEU score calculation
         generated_captions = self.generate_caption(images)
         
-        # Log images and captions every few steps
-        if batch_idx % 100 == 0:  # Adjust frequency as needed
-            self.log_images_and_captions(images, generated_captions)
+        # Log images and captions
+        # In overfit mode, log the first batch every time
+        # In normal mode, log every 100 batches
+        trainer = self.trainer
+        is_overfit = trainer.overfit_batches > 0
+        
+        if (is_overfit and batch_idx == 0) or (not is_overfit and batch_idx % 100 == 0):
+            self.log_images_and_captions(images, generated_captions, prefix="val")
         
         # Store outputs for epoch end
         self.validation_step_outputs.append({
@@ -111,7 +124,7 @@ class BaseImageCaptioning(pl.LightningModule):
         raise NotImplementedError 
     
     def log_images_and_captions(self, images: torch.Tensor, captions: list, attention_maps: torch.Tensor = None, 
-                               max_images: int = 4):
+                               max_images: int = 4, prefix: str = "val"):
         """Log images and their generated captions to wandb."""
         if not self.logger:
             return
@@ -150,5 +163,5 @@ class BaseImageCaptioning(pl.LightningModule):
             else:
                 wandb_images.append(wandb.Image(image, caption=f"Generated: {caption}"))
         
-        # Log to wandb
-        self.logger.experiment.log({"validation_samples": wandb_images}) 
+        # Log to wandb with prefix
+        self.logger.experiment.log({f"{prefix}_samples": wandb_images}) 
