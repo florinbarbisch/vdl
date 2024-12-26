@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 from .base_model import BaseImageCaptioning
 
 class Attention(nn.Module):
@@ -123,10 +123,31 @@ class ShowAttendTell(BaseImageCaptioning):
         
         return loss
     
-    def generate_caption(self, image: torch.Tensor, max_length: int = 20) -> List[List[int]]:
+    def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> Dict:
+        images, captions = batch
+        loss = self.forward(images, captions)
+        
+        # Generate captions and get attention maps
+        generated_captions, attention_maps = self.generate_caption(images, return_attention=True)
+        
+        # Log images and captions with attention maps every few steps
+        if batch_idx % 100 == 0:  # Adjust frequency as needed
+            self.log_images_and_captions(images, generated_captions, attention_maps)
+        
+        # Store outputs for epoch end
+        self.validation_step_outputs.append({
+            'val_loss': loss,
+            'generated_captions': generated_captions,
+            'target_captions': captions
+        })
+        
+        return {'val_loss': loss}
+        
+    def generate_caption(self, image: torch.Tensor, max_length: int = 20, return_attention: bool = False) -> Union[List[List[int]], Tuple[List[List[int]], torch.Tensor]]:
         """Generate captions for given images."""
         batch_size = image.size(0)
         captions = []
+        all_attention_weights = []
         
         # Extract image features
         encoder_out = self.encode_images(image)  # (batch_size, 49, 512)
@@ -135,6 +156,7 @@ class ShowAttendTell(BaseImageCaptioning):
             # Initialize caption generation
             h, c = self.init_hidden_states(encoder_out[i:i+1])
             caption = []
+            attention_weights = []
             
             # First input is <start> token embedding
             word = torch.tensor([1]).to(image.device)  # <start> token
@@ -145,6 +167,8 @@ class ShowAttendTell(BaseImageCaptioning):
                 
                 # Attention weighted encoding
                 attention_weighted_encoding, alpha = self.attention(encoder_out[i:i+1], h)
+                attention_weights.append(alpha)
+                
                 gate = torch.sigmoid(self.f_beta(h))
                 attention_weighted_encoding = gate * attention_weighted_encoding
                 
@@ -166,5 +190,9 @@ class ShowAttendTell(BaseImageCaptioning):
                     break
             
             captions.append(caption)
+            if return_attention:
+                all_attention_weights.append(torch.stack(attention_weights))
         
+        if return_attention:
+            return captions, torch.stack(all_attention_weights)
         return captions 

@@ -5,6 +5,8 @@ import torchvision.models as models
 from typing import Dict, Tuple
 import wandb
 from nltk.translate.bleu_score import corpus_bleu
+import torchvision.transforms as transforms
+import numpy as np
 
 class BaseImageCaptioning(pl.LightningModule):
     def __init__(self, vocab_size: int, embed_size: int = 256, hidden_size: int = 512):
@@ -30,6 +32,14 @@ class BaseImageCaptioning(pl.LightningModule):
         
         # Initialize lists to store step outputs
         self.validation_step_outputs = []
+        
+        # Inverse transform for visualization
+        self.inverse_transform = transforms.Compose([
+            transforms.Normalize(mean=[0., 0., 0.],
+                              std=[1/0.229, 1/0.224, 1/0.225]),
+            transforms.Normalize(mean=[-0.485, -0.456, -0.406],
+                              std=[1., 1., 1.]),
+        ])
         
     def encode_images(self, images: torch.Tensor) -> torch.Tensor:
         """Extract image features using CNN encoder."""
@@ -57,6 +67,10 @@ class BaseImageCaptioning(pl.LightningModule):
         
         # Generate captions for BLEU score calculation
         generated_captions = self.generate_caption(images)
+        
+        # Log images and captions every few steps
+        if batch_idx % 100 == 0:  # Adjust frequency as needed
+            self.log_images_and_captions(images, generated_captions)
         
         # Store outputs for epoch end
         self.validation_step_outputs.append({
@@ -95,3 +109,46 @@ class BaseImageCaptioning(pl.LightningModule):
     def generate_caption(self, image: torch.Tensor) -> list:
         """To be implemented by subclasses."""
         raise NotImplementedError 
+    
+    def log_images_and_captions(self, images: torch.Tensor, captions: list, attention_maps: torch.Tensor = None, 
+                               max_images: int = 4):
+        """Log images and their generated captions to wandb."""
+        if not self.logger:
+            return
+            
+        # Convert images back to [0,1] range for visualization
+        images = self.inverse_transform(images[:max_images])
+        images = [img.cpu().numpy().transpose(1, 2, 0) for img in images]
+        
+        # Create wandb Image objects with captions
+        wandb_images = []
+        for idx, (image, caption) in enumerate(zip(images, captions[:max_images])):
+            # Clip values to [0,1] range
+            image = np.clip(image, 0, 1)
+            
+            if attention_maps is not None:
+                # Get attention map for this image (use mean across words)
+                attn = attention_maps[idx].mean(0)  # Average attention across words
+                attn = attn.reshape(7, 7)  # Reshape to spatial dimensions
+                attn = torch.nn.functional.interpolate(
+                    attn.unsqueeze(0).unsqueeze(0), 
+                    size=image.shape[:2], 
+                    mode='bilinear'
+                ).squeeze().cpu().numpy()
+                
+                # Create a heatmap overlay
+                wandb_images.append(wandb.Image(
+                    image,
+                    caption=f"Generated: {caption}",
+                    masks={
+                        "attention": {
+                            "mask_data": attn,
+                            "class_labels": {0: "attention"}
+                        }
+                    }
+                ))
+            else:
+                wandb_images.append(wandb.Image(image, caption=f"Generated: {caption}"))
+        
+        # Log to wandb
+        self.logger.experiment.log({"validation_samples": wandb_images}) 
