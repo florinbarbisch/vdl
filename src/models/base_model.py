@@ -200,12 +200,12 @@ class BaseImageCaptioning(pl.LightningModule):
             return
             
         # Convert images back to [0,1] range for visualization
-        images = self.inverse_transform(images[:max_images])
+        images = self.inverse_transform(images[::8])  # Take every 8th image
         images = [img.cpu().numpy().transpose(1, 2, 0) for img in images]
         
         # Create wandb Image objects with captions
         wandb_images = []
-        for idx, (image, caption) in enumerate(zip(images, captions[:max_images])):
+        for idx, (image, caption) in enumerate(zip(images, captions[::8])):  # Take every 8th caption
             # Clip values to [0,1] range
             image = np.clip(image, 0, 1)
             
