@@ -4,8 +4,9 @@ import torch
 from torch.utils.data import DataLoader
 from nltk.translate.bleu_score import corpus_bleu
 import wandb
+from tqdm import tqdm
 
-from src.data.dataset import Flickr8kDataset
+from src.data.dataset import Flickr8kDataset, flickr8k_collate_fn
 from src.models.show_and_tell import ShowAndTell
 from src.models.show_attend_tell import ShowAttendTell
 
@@ -32,28 +33,50 @@ def evaluate(model, data_loader, device):
     all_references = []
     all_hypotheses = []
     
+    # Initialize wandb for logging
+    wandb.init(project="image-captioning-comparison", name=f"eval_{model.__class__.__name__}")
+    
     with torch.no_grad():
-        for images, captions in data_loader:
+        for images, captions, original_captions in tqdm(data_loader, desc="Evaluating"):
             images = images.to(device)
             
-            # Generate captions
-            generated_captions = model.generate_caption(images)
+            # Generate captions (and attention maps for Show, Attend and Tell)
+            if isinstance(model, ShowAttendTell):
+                generated_captions, attention_maps = model.generate_caption(images, return_attention=True)
+                # Log images with attention maps
+                model.log_images_and_captions(images, generated_captions, original_captions, attention_maps, prefix="test")
+            else:
+                generated_captions = model.generate_caption(images)
+                # Log images without attention maps
+                model.log_images_and_captions(images, generated_captions, original_captions, prefix="test")
             
             # Convert generated captions and references to words
-            for gen_caption, ref_caption in zip(generated_captions, captions):
+            for gen_caption, orig_captions in zip(generated_captions, original_captions):
                 # Process generated caption
                 hypothesis = convert_ids_to_words(gen_caption, data_loader.dataset.vocab)
                 all_hypotheses.append(hypothesis)
                 
-                # Process reference caption
-                reference = convert_ids_to_words(ref_caption.tolist(), data_loader.dataset.vocab)
-                all_references.append([reference])  # BLEU expects list of references for each hypothesis
+                # Process all 5 reference captions
+                references = []
+                for ref_caption in orig_captions:
+                    # Split the caption string into words
+                    reference = ref_caption.lower().split()
+                    references.append(reference)
+                all_references.append(references)  # Add all 5 references for this hypothesis
     
     # Calculate BLEU scores
     bleu1 = corpus_bleu(all_references, all_hypotheses, weights=(1.0, 0, 0, 0))
     bleu2 = corpus_bleu(all_references, all_hypotheses, weights=(0.5, 0.5, 0, 0))
     bleu3 = corpus_bleu(all_references, all_hypotheses, weights=(0.33, 0.33, 0.33, 0))
     bleu4 = corpus_bleu(all_references, all_hypotheses, weights=(0.25, 0.25, 0.25, 0.25))
+    
+    # Log BLEU scores to wandb
+    wandb.log({
+        'test_bleu1': bleu1 * 100,
+        'test_bleu2': bleu2 * 100,
+        'test_bleu3': bleu3 * 100,
+        'test_bleu4': bleu4 * 100
+    })
     
     return {
         'bleu1': bleu1 * 100,
@@ -63,10 +86,7 @@ def evaluate(model, data_loader, device):
     }
 
 def main(args):
-    # Initialize wandb
-    wandb.init(project="image-captioning-comparison", name=f"{args.model}-evaluation")
-    
-    # Load test dataset
+    # Data loading
     test_dataset = Flickr8kDataset(
         image_dir=os.path.join(DATA_DIR, 'Images'),
         captions_file=os.path.join(DATA_DIR, 'captions.txt'),
@@ -78,7 +98,8 @@ def main(args):
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
-        pin_memory=True
+        pin_memory=True,
+        collate_fn=flickr8k_collate_fn
     )
     
     # Device
@@ -102,16 +123,18 @@ def main(args):
     # Load checkpoint
     checkpoint = torch.load(args.checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
-    model = model.to(device)
+    model.to(device)
+    
+    # Set vocabulary
+    model.set_vocabulary(test_dataset.vocab)
     
     # Evaluate
     metrics = evaluate(model, test_loader, device)
     
-    # Log results
-    print(f"\nResults for {args.model}:")
+    # Print results
+    print("\nTest Results:")
     for metric, value in metrics.items():
         print(f"{metric}: {value:.2f}")
-        wandb.log({metric: value})
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate image captioning models')
@@ -129,7 +152,7 @@ if __name__ == '__main__':
     parser.add_argument('--attention_dim', type=int, default=256,
                         help='Attention layer dimension (for Show, Attend and Tell)')
     
-    # Evaluation arguments
+    # Data loading arguments
     parser.add_argument('--batch_size', type=int, default=32,
                         help='Batch size')
     parser.add_argument('--num_workers', type=int, default=4,
