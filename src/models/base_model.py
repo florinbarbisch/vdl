@@ -148,16 +148,25 @@ class BaseImageCaptioning(pl.LightningModule):
                     size=image.shape[:2], 
                     mode='bilinear'
                 ).squeeze().detach().cpu().numpy()
-                # Create a heatmap overlay
+                # from PIL import Image
+                # diff = attn.max() - attn.min()
+                # arr = (((attn - attn.min()) / diff) * 255).astype(np.uint8)
+                # im = Image.fromarray(arr)
+                # im.save("your_file.png")
+
+                # Create grayscale heatmap
+                attn = (attn - attn.min()) / (attn.max() - attn.min())
+                attn_colored = np.stack([attn, attn, attn], axis=-1)  # Convert to 3 channel grayscale
+                
+                # Blend attention map with original image
+                alpha = 0.8
+                blended = (1-alpha)*image + alpha*attn_colored
+                blended = np.clip(blended, 0, 1)
+                
+                # Log both the attention overlay and original with mask
                 wandb_images.append(wandb.Image(
-                    image,
-                    caption=f"Generated: {caption}",
-                    masks={
-                        "attention": {
-                            "mask_data": attn,
-                            "class_labels": {0: "attention"}
-                        }
-                    }
+                    blended,
+                    caption=f"Generated (with attention overlay): {caption}"
                 ))
             else:
                 wandb_images.append(wandb.Image(image, caption=f"Generated: {caption}"))
