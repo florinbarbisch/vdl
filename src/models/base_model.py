@@ -240,4 +240,6 @@ class BaseImageCaptioning(pl.LightningModule):
                 wandb_images.append(wandb.Image(image, caption=f"Generated: {self.tokens_to_words(caption)}"))
         
         # Log to wandb with prefix
+        # Filter out None values from wandb_images
+        wandb_images = [img for img in wandb_images if img is not None]
         self.logger.experiment.log({f"{prefix}_samples": wandb_images}) 
