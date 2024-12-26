@@ -54,8 +54,14 @@ class Flickr8kDataset(Dataset):
         
         # Filter by split
         split_data = self.captions_data[self.captions_data['split'] == split]
-        self.image_filenames = split_data['image'].tolist()
-        self.captions = split_data['caption'].tolist()
+        
+        # Group captions by image
+        grouped_data = split_data.groupby('image')
+        self.image_filenames = list(grouped_data.groups.keys())
+        self.image_to_captions = {img: group['caption'].tolist() for img, group in grouped_data}
+        
+        # For iteration, use first caption of each image
+        self.captions = [self.image_to_captions[img][0] for img in self.image_filenames]
         
         # Build vocabulary
         self.vocab = self._build_vocabulary()
@@ -63,8 +69,9 @@ class Flickr8kDataset(Dataset):
     def _build_vocabulary(self) -> Dict[str, int]:
         """Build a simple vocabulary wrapper."""
         words = set()
-        for caption in self.captions:
-            words.update(caption.lower().split())
+        for captions in self.image_to_captions.values():
+            for caption in captions:
+                words.update(caption.lower().split())
         
         vocab = {'<pad>': 0, '<start>': 1, '<end>': 2, '<unk>': 3}
         for i, word in enumerate(sorted(words)):
@@ -87,10 +94,14 @@ class Flickr8kDataset(Dataset):
         if self.transform:
             image = self.transform(image)
         
-        # Process caption
+        # Process caption (use first caption for training)
         caption = self._process_caption(self.captions[idx])
         
         return image, caption
+    
+    def get_all_captions(self, image_filename: str) -> List[str]:
+        """Get all 5 captions for a given image filename."""
+        return self.image_to_captions.get(image_filename, [])
     
     @property
     def vocab_size(self) -> int:

@@ -49,7 +49,7 @@ class BaseImageCaptioning(pl.LightningModule):
         """Set the vocabulary mapping."""
         self.id_to_word = {v: k for k, v in vocab.items()}
         
-    def tokens_to_words(self, tokens: List[int]) -> List[str]:
+    def tokens_to_words(self, tokens: List[int]) -> str:
         """Convert token IDs to words."""
         if self.id_to_word is None:
             raise ValueError("Vocabulary not set. Call set_vocabulary first.")
@@ -60,7 +60,7 @@ class BaseImageCaptioning(pl.LightningModule):
                 break
             if token >= 4:  # Skip special tokens
                 words.append(self.id_to_word[token])
-        return words
+        return " ".join(words)
         
     def create_attention_grid(self, image: np.ndarray, caption: List[int], attention_maps: torch.Tensor) -> np.ndarray:
         """Create a grid of attention maps for each word."""
@@ -203,11 +203,21 @@ class BaseImageCaptioning(pl.LightningModule):
         images = self.inverse_transform(images[::8])  # Take every 8th image
         images = [img.cpu().numpy().transpose(1, 2, 0) for img in images]
         
+        # Get the dataset from the trainer
+        dataset = self.trainer.val_dataloaders.dataset if prefix == "val" else self.trainer.train_dataloaders.dataset
+        
         # Create wandb Image objects with captions
         wandb_images = []
         for idx, (image, caption) in enumerate(zip(images, captions[::8])):  # Take every 8th caption
             # Clip values to [0,1] range
             image = np.clip(image, 0, 1)
+            
+            # Get original captions for this image
+            image_filename = dataset.image_filenames[idx * 8]  # Account for the stride of 8
+            original_captions = dataset.get_all_captions(image_filename)
+            caption_text = f"Generated: {self.tokens_to_words(caption)}\n\nOriginal captions:\n"
+            for i, orig_cap in enumerate(original_captions, 1):
+                caption_text += f"{i}. {orig_cap}\n"
             
             if attention_maps is not None:
                 # Log average attention map
@@ -233,11 +243,11 @@ class BaseImageCaptioning(pl.LightningModule):
                 
                 # Log both average attention and per-word attention grid
                 wandb_images.extend([
-                    wandb.Image(blended, caption=f"Generated (average attention): {self.tokens_to_words(caption)}"),
+                    wandb.Image(blended, caption=caption_text),
                     wandb.Image(attention_grid, caption=f"Word-by-word attention") if attention_grid is not None else None
                 ])
             else:
-                wandb_images.append(wandb.Image(image, caption=f"Generated: {self.tokens_to_words(caption)}"))
+                wandb_images.append(wandb.Image(image, caption=caption_text))
         
         # Log to wandb with prefix
         # Filter out None values from wandb_images
