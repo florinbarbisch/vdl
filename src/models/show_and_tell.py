@@ -12,12 +12,28 @@ class ShowAndTell(BaseImageCaptioning):
         self.lstm = nn.LSTM(embed_size, hidden_size, batch_first=True)
         self.linear = nn.Linear(hidden_size, vocab_size)
         
+        # Add dropout for regularization
+        self.dropout = nn.Dropout(0.5)
+        
+        # Hidden state initialization
+        self.init_h = nn.Linear(embed_size, hidden_size)
+        self.init_c = nn.Linear(embed_size, hidden_size)
+    
+    def init_hidden_states(self, features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Initialize LSTM hidden and cell states."""
+        h = self.init_h(features)
+        c = self.init_c(features)
+        return h.unsqueeze(0), c.unsqueeze(0)  # Add sequence dimension for LSTM
+        
     def forward(self, images: torch.Tensor, captions: torch.Tensor) -> torch.Tensor:
         """Forward pass for training."""
         batch_size = images.size(0)
         
         # Extract image features
         features = self.encode_images(images)  # (batch_size, embed_size)
+        
+        # Initialize hidden states
+        hidden = self.init_hidden_states(features)
         
         # Embed captions (exclude last token)
         embeddings = self.embed(captions[:, :-1])  # (batch_size, seq_len-1, embed_size)
@@ -26,8 +42,8 @@ class ShowAndTell(BaseImageCaptioning):
         inputs = torch.cat((features.unsqueeze(1), embeddings), dim=1)  # (batch_size, seq_len, embed_size)
         
         # LSTM forward pass
-        lstm_out, _ = self.lstm(inputs)  # (batch_size, seq_len, hidden_size)
-        outputs = self.linear(lstm_out)  # (batch_size, seq_len, vocab_size)
+        lstm_out, _ = self.lstm(inputs, hidden)  # (batch_size, seq_len, hidden_size)
+        outputs = self.linear(self.dropout(lstm_out))  # Add dropout before linear layer
         
         # Calculate cross entropy loss
         # Reshape outputs to (batch_size * seq_len, vocab_size)
