@@ -8,6 +8,7 @@ from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
 import torchvision.transforms as transforms
 import numpy as np
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 
 class BaseImageCaptioning(pl.LightningModule):
     def __init__(self, vocab_size: int, embed_size: int = 256, hidden_size: int = 512):
@@ -176,22 +177,38 @@ class BaseImageCaptioning(pl.LightningModule):
         hypotheses = []  # Generated captions
         references = []  # Ground truth captions
         
+        # For top-k accuracy
+        total_words = 0
+        top1_hits = 0
+        top5_hits = 0
+        
         for output in outputs:
-            for gen_caption in output['generated_captions']:
+            for gen_caption, target_caption in zip(output['generated_captions'], output['target_captions']):
+                # Convert generated caption tokens to words for BLEU
                 hypothesis = self.tokens_to_words(gen_caption)
                 hypotheses.append(hypothesis)
                 
-            batch_references = []
-            for caption_tensor in output['target_captions']:
-                reference = self.tokens_to_words(caption_tensor.tolist())
+                # Process reference caption for BLEU
+                reference = self.tokens_to_words(target_caption.tolist())
                 if reference:  # Only add non-empty references
                     batch_references.append([reference])
+                
+                # Calculate top-k accuracy
+                # Compare each generated word with target word (excluding <start> and special tokens)
+                for gen_word, target_word in zip(gen_caption[:-1], target_caption[1:]):  # Shift target by 1
+                    if target_word == 0:  # Skip padding
+                        continue
+                    total_words += 1
+                    if gen_word == target_word:  # Top-1 hit
+                        top1_hits += 1
+                    if target_word in torch.topk(F.softmax(outputs[total_words-1], dim=0), k=5)[1]:  # Top-5 hit
+                        top5_hits += 1
+            
             references.extend(batch_references)
         
         # Calculate BLEU scores with smoothing
         if hypotheses and references:
             # Initialize smoothing function
-            # NLTK's method1 adds a small constant (1) to both numerator and denominator of the modified precision calculation, which helps avoid zero scores when there are no matches.
             smoothing = SmoothingFunction().method1
             
             # Calculate BLEU scores with smoothing
@@ -201,6 +218,10 @@ class BaseImageCaptioning(pl.LightningModule):
             bleu4 = corpus_bleu(references, hypotheses, weights=(0.25, 0.25, 0.25, 0.25), smoothing_function=smoothing)
         else:
             bleu1 = bleu2 = bleu3 = bleu4 = 0.0
+        
+        # Calculate top-k accuracy
+        top1_acc = (top1_hits / total_words) * 100 if total_words > 0 else 0
+        top5_acc = (top5_hits / total_words) * 100 if total_words > 0 else 0
             
         # Log metrics
         self.log('val_loss', avg_loss, prog_bar=True)
@@ -208,6 +229,8 @@ class BaseImageCaptioning(pl.LightningModule):
         self.log('bleu2', bleu2 * 100, prog_bar=True)
         self.log('bleu3', bleu3 * 100, prog_bar=True)
         self.log('bleu4', bleu4 * 100, prog_bar=True)
+        self.log('val_top1_acc', top1_acc, prog_bar=True)
+        self.log('val_top5_acc', top5_acc, prog_bar=True)
         
         # Clear memory
         self.validation_step_outputs.clear()

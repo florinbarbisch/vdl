@@ -34,12 +34,18 @@ def evaluate(model, data_loader, device):
     all_references = []
     all_hypotheses = []
     
+    # For top-k accuracy
+    total_words = 0
+    top1_hits = 0
+    top5_hits = 0
+    
     # Initialize wandb for logging
     wandb.init(project="image-captioning-comparison", name=f"eval_{model.__class__.__name__}")
     
     with torch.no_grad():
         for images, captions, original_captions in tqdm(data_loader, desc="Evaluating"):
             images = images.to(device)
+            captions = captions.to(device)  # Move captions to device for accuracy calculation
             
             # Generate captions (and attention maps for Show, Attend and Tell)
             if isinstance(model, ShowAttendTell):
@@ -66,18 +72,57 @@ def evaluate(model, data_loader, device):
                 model.log_images_and_captions(images, generated_captions, original_captions, prefix="test")
             
             # Convert generated captions and references to words
-            for gen_caption, orig_captions in zip(generated_captions, original_captions):
-                # Process generated caption
+            for gen_caption, target_caption, orig_captions in zip(generated_captions, captions, original_captions):
+                # Process generated caption for BLEU
                 hypothesis = convert_ids_to_words(gen_caption, data_loader.dataset.vocab)
                 all_hypotheses.append(hypothesis)
                 
-                # Process all 5 reference captions
+                # Process all 5 reference captions for BLEU
                 references = []
                 for ref_caption in orig_captions:
                     # Split the caption string into words
                     reference = ref_caption.lower().split()
                     references.append(reference)
                 all_references.append(references)  # Add all 5 references for this hypothesis
+                
+                # Calculate top-k accuracy
+                # Compare each generated word with target word (excluding <start> and special tokens)
+                for gen_word, target_word in zip(gen_caption[:-1], target_caption[1:]):  # Shift target by 1
+                    if target_word == 0:  # Skip padding
+                        continue
+                    total_words += 1
+                    if gen_word == target_word:  # Top-1 hit
+                        top1_hits += 1
+                    # For top-5, we need to run the model's forward pass
+                    with torch.set_grad_enabled(False):
+                        if isinstance(model, ShowAttendTell):
+                            # Get encoder features
+                            encoder_out = model.encode_images(images[0:1])  # Use first image
+                            # Initialize states
+                            h, c = model.init_hidden_states(encoder_out)
+                            # Get attention and prediction
+                            attention_weighted_encoding, _ = model.attention(encoder_out, h)
+                            gate = torch.sigmoid(model.f_beta(h))
+                            attention_weighted_encoding = gate * attention_weighted_encoding
+                            # Get word embedding
+                            word_embed = model.embed(torch.tensor([gen_word], device=device))
+                            # LSTM step
+                            h, c = model.decode_step(
+                                torch.cat([word_embed, attention_weighted_encoding], dim=1),
+                                (h, c)
+                            )
+                            # Get prediction
+                            scores = model.fc(h)
+                        else:
+                            # For Show and Tell, simpler forward pass
+                            feature = model.encode_images(images[0:1])
+                            hidden = None
+                            lstm_out, hidden = model.lstm(feature.unsqueeze(1), hidden)
+                            scores = model.linear(lstm_out.squeeze(1))
+                        
+                        # Check if target is in top 5
+                        if target_word in torch.topk(F.softmax(scores, dim=1), k=5)[1]:
+                            top5_hits += 1
     
     # Calculate BLEU scores
     bleu1 = corpus_bleu(all_references, all_hypotheses, weights=(1.0, 0, 0, 0))
@@ -85,19 +130,27 @@ def evaluate(model, data_loader, device):
     bleu3 = corpus_bleu(all_references, all_hypotheses, weights=(0.33, 0.33, 0.33, 0))
     bleu4 = corpus_bleu(all_references, all_hypotheses, weights=(0.25, 0.25, 0.25, 0.25))
     
-    # Log BLEU scores to wandb
+    # Calculate top-k accuracy
+    top1_acc = (top1_hits / total_words) * 100 if total_words > 0 else 0
+    top5_acc = (top5_hits / total_words) * 100 if total_words > 0 else 0
+    
+    # Log metrics to wandb
     wandb.log({
         'test_bleu1': bleu1 * 100,
         'test_bleu2': bleu2 * 100,
         'test_bleu3': bleu3 * 100,
-        'test_bleu4': bleu4 * 100
+        'test_bleu4': bleu4 * 100,
+        'test_top1_acc': top1_acc,
+        'test_top5_acc': top5_acc
     })
     
     return {
         'bleu1': bleu1 * 100,
         'bleu2': bleu2 * 100,
         'bleu3': bleu3 * 100,
-        'bleu4': bleu4 * 100
+        'bleu4': bleu4 * 100,
+        'top1_acc': top1_acc,
+        'top5_acc': top5_acc
     }
 
 def main(args):
