@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 import torchvision.models as models
 from typing import Dict, Tuple, List
 import wandb
-from nltk.translate.bleu_score import corpus_bleu
+from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
 import torchvision.transforms as transforms
 import numpy as np
 import matplotlib.pyplot as plt
@@ -178,25 +178,27 @@ class BaseImageCaptioning(pl.LightningModule):
         
         for output in outputs:
             for gen_caption in output['generated_captions']:
-                # Convert generated caption tokens to words
                 hypothesis = self.tokens_to_words(gen_caption)
                 hypotheses.append(hypothesis)
                 
-            # Process all reference captions in the batch
             batch_references = []
             for caption_tensor in output['target_captions']:
-                # Convert each reference caption tensor to words
                 reference = self.tokens_to_words(caption_tensor.tolist())
                 if reference:  # Only add non-empty references
-                    batch_references.append([reference])  # Wrap in list for corpus_bleu format
+                    batch_references.append([reference])
             references.extend(batch_references)
         
-        # Calculate BLEU scores
-        if hypotheses and references:  # Only calculate if we have valid captions
-            bleu1 = corpus_bleu(references, hypotheses, weights=(1.0, 0, 0, 0))
-            bleu2 = corpus_bleu(references, hypotheses, weights=(0.5, 0.5, 0, 0))
-            bleu3 = corpus_bleu(references, hypotheses, weights=(0.33, 0.33, 0.33, 0))
-            bleu4 = corpus_bleu(references, hypotheses, weights=(0.25, 0.25, 0.25, 0.25))
+        # Calculate BLEU scores with smoothing
+        if hypotheses and references:
+            # Initialize smoothing function
+            # NLTK's method1 adds a small constant (1) to both numerator and denominator of the modified precision calculation, which helps avoid zero scores when there are no matches.
+            smoothing = SmoothingFunction().method1
+            
+            # Calculate BLEU scores with smoothing
+            bleu1 = corpus_bleu(references, hypotheses, weights=(1.0, 0, 0, 0), smoothing_function=smoothing)
+            bleu2 = corpus_bleu(references, hypotheses, weights=(0.5, 0.5, 0, 0), smoothing_function=smoothing)
+            bleu3 = corpus_bleu(references, hypotheses, weights=(0.33, 0.33, 0.33, 0), smoothing_function=smoothing)
+            bleu4 = corpus_bleu(references, hypotheses, weights=(0.25, 0.25, 0.25, 0.25), smoothing_function=smoothing)
         else:
             bleu1 = bleu2 = bleu3 = bleu4 = 0.0
             
