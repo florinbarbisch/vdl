@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from nltk.translate.bleu_score import corpus_bleu
 import wandb
 from tqdm import tqdm
+import numpy as np
 
 from src.data.dataset import Flickr8kDataset, flickr8k_collate_fn
 from src.models.show_and_tell import ShowAndTell
@@ -43,8 +44,22 @@ def evaluate(model, data_loader, device):
             # Generate captions (and attention maps for Show, Attend and Tell)
             if isinstance(model, ShowAttendTell):
                 generated_captions, attention_maps = model.generate_caption(images, return_attention=True)
-                # Log images with attention maps
+                
+                # Convert images for attention grid visualization
+                images_np = [model.inverse_transform(img).cpu().numpy().transpose(1, 2, 0) for img in images]
+                images_np = [np.clip(img, 0, 1) for img in images_np]
+                
+                # Create attention grids for each image
+                attention_grids = []
+                for idx, (image, gen_caption, attn_maps) in enumerate(zip(images_np, generated_captions, attention_maps)):
+                    attention_grid = model.create_attention_grid(image, gen_caption, attn_maps)
+                    if attention_grid is not None:
+                        attention_grids.append(wandb.Image(attention_grid, caption=f"Word-by-word attention for image {idx}"))
+                
+                # Log images with attention maps and grids
                 model.log_images_and_captions(images, generated_captions, original_captions, attention_maps, prefix="test")
+                if attention_grids:
+                    wandb.log({"test_attention_grids": attention_grids})
             else:
                 generated_captions = model.generate_caption(images)
                 # Log images without attention maps
