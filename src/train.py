@@ -82,6 +82,7 @@ def main(args):
     # Callbacks
     callbacks = []
     if not args.debug:
+        # Save best models based on validation loss
         checkpoint_callback = ModelCheckpoint(
             dirpath=args.checkpoint_dir,
             filename=f'{args.model}-{{epoch:02d}}-{{val_loss:.2f}}',
@@ -89,7 +90,14 @@ def main(args):
             mode='min',
             save_top_k=3
         )
-        callbacks.append(checkpoint_callback)
+        
+        # Save last model
+        last_model_callback = ModelCheckpoint(
+            dirpath=args.checkpoint_dir,
+            filename=f'{args.model}-last',
+            save_last=True
+        )
+        callbacks.extend([checkpoint_callback, last_model_callback])
     
     # Trainer configuration
     trainer_kwargs = {
