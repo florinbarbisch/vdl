@@ -67,18 +67,24 @@ class Flickr8kDataset(Dataset):
         # Build vocabulary
         self.vocab = self._build_vocabulary()
         
-    def _build_vocabulary(self) -> Dict[str, int]:
-        """Build a simple vocabulary wrapper."""
-        words = set()
+    def _build_vocabulary(self, min_freq: int = 3) -> Dict[str, int]:
+        """Build vocabulary wrapper with minimum frequency threshold."""
+        word_freq = {}
+        
+        # Count word frequencies
         for captions in self.image_to_captions.values():
             for caption in captions:
-                words.update(caption.lower().split())
+                for word in caption.lower().split():
+                    word_freq[word] = word_freq.get(word, 0) + 1
         
+        # Create vocabulary with words above threshold
         vocab = {'<pad>': 0, '<start>': 1, '<end>': 2, '<unk>': 3}
-        for i, word in enumerate(sorted(words)):
-            vocab[word] = i + 4
+        for word, freq in sorted(word_freq.items()):
+            if freq >= min_freq:
+                vocab[word] = len(vocab)
+                
         return vocab
-    
+        
     def _process_caption(self, caption: str) -> torch.Tensor:
         """Convert caption string to tensor of indices."""
         tokens = ['<start>'] + caption.lower().split() + ['<end>']
