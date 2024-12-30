@@ -4,6 +4,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from PIL import Image
 import pandas as pd
+import json
 from typing import Dict, List, Tuple
 from torch.nn.utils.rnn import pad_sequence
 
@@ -64,26 +65,15 @@ class Flickr8kDataset(Dataset):
         # For iteration, use first caption of each image
         self.captions = [self.image_to_captions[img][0] for img in self.image_filenames]
         
-        # Build vocabulary
-        self.vocab = self._build_vocabulary()
-        
-    def _build_vocabulary(self, min_freq: int = 3) -> Dict[str, int]:
-        """Build vocabulary wrapper with minimum frequency threshold."""
-        word_freq = {}
-        
-        # Count word frequencies
-        for captions in self.image_to_captions.values():
-            for caption in captions:
-                for word in caption.lower().split():
-                    word_freq[word] = word_freq.get(word, 0) + 1
-        
-        # Create vocabulary with words above threshold
-        vocab = {'<pad>': 0, '<start>': 1, '<end>': 2, '<unk>': 3}
-        for word, freq in sorted(word_freq.items()):
-            if freq >= min_freq:
-                vocab[word] = len(vocab)
-                
-        return vocab
+        # Load vocabulary
+        vocab_file = os.path.join(os.path.dirname(captions_file), "vocab.json")
+        if not os.path.exists(vocab_file):
+            raise FileNotFoundError(
+                f"Vocabulary file not found at {vocab_file}. "
+                "Please run prepare_dataset.py first to create the vocabulary."
+            )
+        with open(vocab_file, 'r') as f:
+            self.vocab = json.load(f)
         
     def _process_caption(self, caption: str) -> torch.Tensor:
         """Convert caption string to tensor of indices."""

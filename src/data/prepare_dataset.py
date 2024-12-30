@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import kaggle
+import json
 from sklearn.model_selection import train_test_split
 
 def download_dataset():
@@ -17,6 +18,25 @@ def download_dataset():
         kaggle.api.dataset_download_files("adityajn105/flickr8k", path=data_dir, unzip=True)
         print("Dataset downloaded to:", data_dir)
     return data_dir
+
+def build_vocabulary(df: pd.DataFrame, min_freq: int = 3) -> dict:
+    """Build vocabulary from captions with minimum frequency threshold."""
+    print("Building vocabulary...")
+    word_freq = {}
+    
+    # Count word frequencies across all captions
+    for caption in df['caption']:
+        for word in caption.lower().split():
+            word_freq[word] = word_freq.get(word, 0) + 1
+    
+    # Create vocabulary with words above threshold
+    vocab = {'<pad>': 0, '<start>': 1, '<end>': 2, '<unk>': 3}
+    for word, freq in sorted(word_freq.items()):
+        if freq >= min_freq:
+            vocab[word] = len(vocab)
+    
+    print(f"Vocabulary size: {len(vocab)}")
+    return vocab
 
 def prepare_captions(captions_file: str):
     """Prepare captions.txt by adding train/val/test split."""
@@ -36,6 +56,16 @@ def prepare_captions(captions_file: str):
     df['split'] = 'train'  # default value
     df.loc[df['image'].isin(val_images), 'split'] = 'val'
     df.loc[df['image'].isin(test_images), 'split'] = 'test'
+    
+    # Build vocabulary using only training captions
+    train_df = df[df['split'] == 'train']
+    vocab = build_vocabulary(train_df)
+    
+    # Save vocabulary
+    vocab_file = os.path.join(os.path.dirname(captions_file), "vocab.json")
+    with open(vocab_file, 'w') as f:
+        json.dump(vocab, f)
+    print(f"Vocabulary saved to: {vocab_file}")
     
     # Save updated captions file
     df.to_csv(captions_file, index=False)
