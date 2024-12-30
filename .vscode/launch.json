@@ -27,6 +27,17 @@
             "program": "src/train.py",
             "console": "integratedTerminal",
             "args": ["--model", "show_attend_tell"]
+        },
+        {
+            "name": "Python Debugger: Evaluate Show-Tell Model",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "eval.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--model", "show_tell",
+                "--checkpoint_path", "./checkpoints/show_tell-last.ckpt"
+            ]
         }
     ]
 }
