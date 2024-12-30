@@ -38,28 +38,30 @@ def evaluate(model, data_loader, device):
     wandb.init(project="image-captioning-comparison", name=f"eval_{model.__class__.__name__}")
     
     with torch.no_grad():
-        for images, captions, original_captions in tqdm(data_loader, desc="Evaluating"):
+        for batch_idx, (images, captions, original_captions) in enumerate(tqdm(data_loader, desc="Evaluating")):
             images = images.to(device)
             
             # Generate captions (and attention maps for Show, Attend and Tell)
             if isinstance(model, ShowAttendTell):
                 generated_captions, attention_maps = model.generate_caption(images, return_attention=True)
                 
-                # Convert images for attention grid visualization
-                images_np = [model.inverse_transform(img).cpu().numpy().transpose(1, 2, 0) for img in images]
-                images_np = [np.clip(img, 0, 1) for img in images_np]
-                
-                # Create attention grids for each image
-                attention_grids = []
-                for idx, (image, gen_caption, attn_maps) in enumerate(zip(images_np, generated_captions, attention_maps)):
-                    attention_grid = model.create_attention_grid(image, gen_caption, attn_maps)
-                    if attention_grid is not None:
-                        attention_grids.append(wandb.Image(attention_grid, caption=f"Word-by-word attention for image {idx}"))
-                
-                # Log images with attention maps and grids
-                model.log_images_and_captions(images, generated_captions, original_captions, attention_maps, prefix="test")
-                if attention_grids:
-                    wandb.log({"test_attention_grids": attention_grids})
+                # Only create and log attention grids every 8th batch for 8 images
+                if batch_idx % 8 == 0:
+                    # Convert images for attention grid visualization
+                    images_np = [model.inverse_transform(img).cpu().numpy().transpose(1, 2, 0) for img in images[:8]]
+                    images_np = [np.clip(img, 0, 1) for img in images_np]
+                    
+                    # Create attention grids for selected images
+                    attention_grids = []
+                    for idx, (image, gen_caption, attn_maps) in enumerate(zip(images_np, generated_captions[:8], attention_maps[:8])):
+                        attention_grid = model.create_attention_grid(image, gen_caption, attn_maps)
+                        if attention_grid is not None:
+                            attention_grids.append(wandb.Image(attention_grid, caption=f"Word-by-word attention for image {idx}"))
+                    
+                    # Log images with attention maps and grids
+                    model.log_images_and_captions(images[:8], generated_captions[:8], original_captions[:8], attention_maps[:8], prefix="test")
+                    if attention_grids:
+                        wandb.log({"test_attention_grids": attention_grids})
             else:
                 generated_captions = model.generate_caption(images)
                 # Log images without attention maps
