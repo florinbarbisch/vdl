@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
-from typing import Dict, List, Tuple
+import torch.nn.functional as F
+from typing import Dict, List, Tuple, Union
 from .base_model import BaseImageCaptioning
 
 class ShowAndTell(BaseImageCaptioning):
@@ -38,8 +39,15 @@ class ShowAndTell(BaseImageCaptioning):
         
         return loss
     
-    def generate_caption(self, image: torch.Tensor, max_length: int = 20) -> List[List[int]]:
-        """Generate captions for given images."""
+    def generate_caption(self, image: torch.Tensor, max_length: int = 20, beam_size: int = None) -> Union[List[List[int]], List[List[Tuple[List[int], float]]]]:
+        """Generate captions for given images using either greedy search or beam search."""
+        if beam_size is None or beam_size == 1:
+            return self._generate_caption_greedy(image, max_length)
+        else:
+            return self._generate_caption_beam(image, max_length, beam_size)
+    
+    def _generate_caption_greedy(self, image: torch.Tensor, max_length: int = 20) -> List[List[int]]:
+        """Generate captions using greedy search."""
         batch_size = image.size(0)
         captions = []
         
@@ -70,4 +78,74 @@ class ShowAndTell(BaseImageCaptioning):
             
             captions.append(caption)
         
-        return captions 
+        return captions
+    
+    def _generate_caption_beam(self, image: torch.Tensor, max_length: int = 20, beam_size: int = 3) -> List[List[Tuple[List[int], float]]]:
+        """Generate captions using beam search."""
+        batch_size = image.size(0)
+        all_captions = []
+        
+        for i in range(batch_size):
+            # Initialize caption generation
+            feature = self.encode_images(image[i:i+1])
+            
+            # First input is the image feature
+            inputs = feature.unsqueeze(1)
+            
+            # Get initial hidden state
+            lstm_out, hidden = self.lstm(inputs)
+            outputs = self.linear(lstm_out.squeeze(1))
+            
+            # Initialize beam with top-k most likely first words
+            log_probs = F.log_softmax(outputs, dim=1)
+            topk_log_probs, topk_words = log_probs.topk(beam_size, 1)
+            
+            # Initialize beams: (sequence, score, hidden_state, cell_state)
+            beams = [(
+                [word.item()],
+                score.item(),
+                hidden[0].squeeze(0),
+                hidden[1].squeeze(0)
+            ) for word, score in zip(topk_words[0], topk_log_probs[0])]
+            
+            # Expand beams
+            for _ in range(max_length - 1):
+                candidates = []
+                
+                # Expand each beam
+                for sequence, score, h, c in beams:
+                    if sequence[-1] == 2:  # if last token is <end>
+                        candidates.append((sequence, score, h, c))
+                        continue
+                        
+                    # Get predictions for next word
+                    word_input = torch.tensor([sequence[-1]], device=image.device)
+                    inputs = self.embed(word_input).unsqueeze(1)
+                    lstm_out, (h_new, c_new) = self.lstm(inputs, (h.unsqueeze(0), c.unsqueeze(0)))
+                    outputs = self.linear(lstm_out.squeeze(1))
+                    log_probs = F.log_softmax(outputs, dim=1)
+                    
+                    # Get top k words
+                    topk_log_probs, topk_words = log_probs.topk(beam_size, 1)
+                    
+                    # Create new candidates
+                    for word, word_score in zip(topk_words[0], topk_log_probs[0]):
+                        word_item = word.item()
+                        candidates.append((
+                            sequence + [word_item],
+                            score + word_score.item(),
+                            h_new.squeeze(0),
+                            c_new.squeeze(0)
+                        ))
+                
+                # Select top k candidates
+                beams = sorted(candidates, key=lambda x: x[1], reverse=True)[:beam_size]
+                
+                # Early stopping if all beams end with <end>
+                if all(beam[0][-1] == 2 for beam in beams):
+                    break
+            
+            # Add final beam results (sequence and score) for this image
+            all_captions.append([(beam[0], beam[1]) for beam in beams])
+        
+        return all_captions 

@@ -29,10 +29,11 @@ def convert_ids_to_words(caption_ids: list, vocab: dict) -> list:
     
     return words
 
-def evaluate(model, data_loader, device):
+def evaluate(model, data_loader, device, beam_size: int = 3):
     model.eval()
     all_references = []
-    all_hypotheses = []
+    all_hypotheses_greedy = []
+    all_hypotheses_beam = []
     
     # Initialize wandb for logging
     wandb.init(project="image-captioning-comparison", name=f"eval_{model.__class__.__name__}")
@@ -41,66 +42,106 @@ def evaluate(model, data_loader, device):
         for batch_idx, (images, captions, original_captions) in enumerate(tqdm(data_loader, desc="Evaluating")):
             images = images.to(device)
             
-            # Generate captions (and attention maps for Show, Attend and Tell)
+            # Generate captions using both greedy and beam search
             if isinstance(model, ShowAttendTell):
-                generated_captions, attention_maps = model.generate_caption(images, return_attention=True)
+                # Greedy search with attention
+                greedy_captions, greedy_attention = model.generate_caption(images, return_attention=True)
+                # Beam search with attention
+                beam_results, beam_attention = model.generate_caption(images, beam_size=beam_size, return_attention=True)
+                beam_captions = [beam[0][0] for beam in beam_results]  # Take the top beam for each image
                 
                 # Only create and log attention grids every 8th batch for 8 images
                 if batch_idx % 8 == 0:
-                    # Convert images for attention grid visualization
+                    # Convert images for visualization
                     images_np = [model.inverse_transform(img).cpu().numpy().transpose(1, 2, 0) for img in images[:8]]
                     images_np = [np.clip(img, 0, 1) for img in images_np]
                     
-                    # Create attention grids for selected images
+                    # Create attention grids for both methods
                     attention_grids = []
-                    for idx, (image, gen_caption, attn_maps) in enumerate(zip(images_np, generated_captions[:8], attention_maps[:8])):
-                        attention_grid = model.create_attention_grid(image, gen_caption, attn_maps)
-                        if attention_grid is not None:
-                            attention_grids.append(wandb.Image(attention_grid, caption=f"Word-by-word attention for image {idx}"))
+                    for idx, (image, greedy_cap, beam_cap, greedy_attn, beam_attn) in enumerate(zip(
+                        images_np[:8], greedy_captions[:8], beam_captions[:8], 
+                        greedy_attention[:8], beam_attention[:8]
+                    )):
+                        # Create attention grids
+                        greedy_grid = model.create_attention_grid(image, greedy_cap, greedy_attn)
+                        beam_grid = model.create_attention_grid(image, beam_cap, beam_attn)
+                        
+                        if greedy_grid is not None and beam_grid is not None:
+                            # Combine grids side by side
+                            # Make both grids the same height by padding the shorter one
+                            max_height = max(greedy_grid.shape[0], beam_grid.shape[0])
+                            if greedy_grid.shape[0] < max_height:
+                                pad_height = max_height - greedy_grid.shape[0]
+                                greedy_grid = np.vstack([greedy_grid, np.ones((pad_height, greedy_grid.shape[1], *greedy_grid.shape[2:]))])
+                            elif beam_grid.shape[0] < max_height:
+                                pad_height = max_height - beam_grid.shape[0]
+                                beam_grid = np.vstack([beam_grid, np.ones((pad_height, beam_grid.shape[1], *beam_grid.shape[2:]))])
+                            combined_grid = np.hstack([greedy_grid, beam_grid])
+                            attention_grids.append(wandb.Image(
+                                combined_grid,
+                                caption=f"Left: Greedy Search Attention | Right: Beam Search Attention (image {idx})"
+                            ))
                     
                     # Log images with attention maps and grids
-                    model.log_images_and_captions(images[:8], generated_captions[:8], original_captions[:8], attention_maps[:8], prefix="test")
+                    model.log_images_and_captions(
+                        images[:8], greedy_captions[:8], original_captions[:8], 
+                        greedy_attention[:8], prefix="test_greedy"
+                    )
+                    model.log_images_and_captions(
+                        images[:8], beam_captions[:8], original_captions[:8], 
+                        beam_attention[:8], prefix="test_beam"
+                    )
                     if attention_grids:
-                        wandb.log({"test_attention_grids": attention_grids})
+                        wandb.log({"test_attention_comparison": attention_grids})
             else:
-                generated_captions = model.generate_caption(images)
-                # Log images without attention maps
-                model.log_images_and_captions(images, generated_captions, original_captions, prefix="test")
+                # For Show and Tell model (no attention)
+                greedy_captions = model.generate_caption(images)
+                beam_results = model.generate_caption(images, beam_size=beam_size)
+                beam_captions = [beam[0][0] for beam in beam_results]  # Take the top beam for each image
+                
+                # Log images and captions
+                if batch_idx % 8 == 0:
+                    model.log_images_and_captions(images[:8], greedy_captions[:8], original_captions[:8], prefix="test_greedy")
+                    model.log_images_and_captions(images[:8], beam_captions[:8], original_captions[:8], prefix="test_beam")
             
             # Convert generated captions and references to words
-            for gen_caption, orig_captions in zip(generated_captions, original_captions):
-                # Process generated caption
-                hypothesis = convert_ids_to_words(gen_caption, data_loader.dataset.vocab)
-                all_hypotheses.append(hypothesis)
+            for greedy_cap, beam_cap, orig_captions in zip(greedy_captions, beam_captions, original_captions):
+                # Process greedy caption
+                greedy_hypothesis = convert_ids_to_words(greedy_cap, data_loader.dataset.vocab)
+                all_hypotheses_greedy.append(greedy_hypothesis)
                 
-                # Process all 5 reference captions
-                references = []
-                for ref_caption in orig_captions:
-                    # Split the caption string into words
-                    reference = ref_caption.lower().split()
-                    references.append(reference)
-                all_references.append(references)  # Add all 5 references for this hypothesis
+                # Process beam search caption
+                beam_hypothesis = convert_ids_to_words(beam_cap, data_loader.dataset.vocab)
+                all_hypotheses_beam.append(beam_hypothesis)
+                
+                # Process all 5 reference captions (only need to do this once)
+                if len(all_references) < len(all_hypotheses_greedy):
+                    references = []
+                    for ref_caption in orig_captions:
+                        # Split the caption string into words
+                        reference = ref_caption.lower().split()
+                        references.append(reference)
+                    all_references.append(references)
     
-    # Calculate BLEU scores
-    bleu1 = corpus_bleu(all_references, all_hypotheses, weights=(1.0, 0, 0, 0))
-    bleu2 = corpus_bleu(all_references, all_hypotheses, weights=(0.5, 0.5, 0, 0))
-    bleu3 = corpus_bleu(all_references, all_hypotheses, weights=(0.33, 0.33, 0.33, 0))
-    bleu4 = corpus_bleu(all_references, all_hypotheses, weights=(0.25, 0.25, 0.25, 0.25))
+    # Calculate BLEU scores for both methods
+    metrics = {}
+    
+    # Greedy search metrics
+    metrics['greedy_bleu1'] = corpus_bleu(all_references, all_hypotheses_greedy, weights=(1.0, 0, 0, 0)) * 100
+    metrics['greedy_bleu2'] = corpus_bleu(all_references, all_hypotheses_greedy, weights=(0.5, 0.5, 0, 0)) * 100
+    metrics['greedy_bleu3'] = corpus_bleu(all_references, all_hypotheses_greedy, weights=(0.33, 0.33, 0.33, 0)) * 100
+    metrics['greedy_bleu4'] = corpus_bleu(all_references, all_hypotheses_greedy, weights=(0.25, 0.25, 0.25, 0.25)) * 100
+    
+    # Beam search metrics
+    metrics['beam_bleu1'] = corpus_bleu(all_references, all_hypotheses_beam, weights=(1.0, 0, 0, 0)) * 100
+    metrics['beam_bleu2'] = corpus_bleu(all_references, all_hypotheses_beam, weights=(0.5, 0.5, 0, 0)) * 100
+    metrics['beam_bleu3'] = corpus_bleu(all_references, all_hypotheses_beam, weights=(0.33, 0.33, 0.33, 0)) * 100
+    metrics['beam_bleu4'] = corpus_bleu(all_references, all_hypotheses_beam, weights=(0.25, 0.25, 0.25, 0.25)) * 100
     
     # Log BLEU scores to wandb
-    wandb.log({
-        'test_bleu1': bleu1 * 100,
-        'test_bleu2': bleu2 * 100,
-        'test_bleu3': bleu3 * 100,
-        'test_bleu4': bleu4 * 100
-    })
+    wandb.log(metrics)
     
-    return {
-        'bleu1': bleu1 * 100,
-        'bleu2': bleu2 * 100,
-        'bleu3': bleu3 * 100,
-        'bleu4': bleu4 * 100
-    }
+    return metrics
 
 def main(args):
     # Data loading
@@ -146,12 +187,18 @@ def main(args):
     model.set_vocabulary(test_dataset.vocab)
     
     # Evaluate
-    metrics = evaluate(model, test_loader, device)
+    metrics = evaluate(model, test_loader, device, args.beam_size)
     
     # Print results
     print("\nTest Results:")
+    print("\nGreedy Search:")
     for metric, value in metrics.items():
-        print(f"{metric}: {value:.2f}")
+        if metric.startswith('greedy_'):
+            print(f"{metric[7:]}: {value:.2f}")
+    print("\nBeam Search:")
+    for metric, value in metrics.items():
+        if metric.startswith('beam_'):
+            print(f"{metric[5:]}: {value:.2f}")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate image captioning models')
@@ -168,6 +215,8 @@ if __name__ == '__main__':
                         help='LSTM hidden size')
     parser.add_argument('--attention_dim', type=int, default=256,
                         help='Attention layer dimension (for Show, Attend and Tell)')
+    parser.add_argument('--beam_size', type=int, default=3,
+                        help='Beam size for beam search')
     
     # Data loading arguments
     parser.add_argument('--batch_size', type=int, default=32,

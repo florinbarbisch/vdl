@@ -165,8 +165,15 @@ class ShowAttendTell(BaseImageCaptioning):
         
         return {'val_loss': loss}
         
-    def generate_caption(self, image: torch.Tensor, max_length: int = 20, return_attention: bool = False) -> Union[List[List[int]], Tuple[List[List[int]], torch.Tensor]]:
-        """Generate captions for given images."""
+    def generate_caption(self, image: torch.Tensor, max_length: int = 20, beam_size: int = None, return_attention: bool = False) -> Union[List[List[int]], Tuple[List[List[int]], torch.Tensor], List[List[Tuple[List[int], float]]], Tuple[List[List[Tuple[List[int], float]]], torch.Tensor]]:
+        """Generate captions for given images using either greedy search or beam search."""
+        if beam_size is None or beam_size == 1:
+            return self._generate_caption_greedy(image, max_length, return_attention)
+        else:
+            return self._generate_caption_beam(image, max_length, beam_size, return_attention)
+    
+    def _generate_caption_greedy(self, image: torch.Tensor, max_length: int = 20, return_attention: bool = False) -> Union[List[List[int]], Tuple[List[List[int]], torch.Tensor]]:
+        """Generate captions using greedy search."""
         batch_size = image.size(0)
         captions = []
         all_attention_weights = []
@@ -227,4 +234,116 @@ class ShowAttendTell(BaseImageCaptioning):
                 else:
                     padded_weights.append(weights)
             return captions, torch.stack(padded_weights)
-        return captions 
+        return captions
+    
+    def _generate_caption_beam(self, image: torch.Tensor, max_length: int = 20, beam_size: int = 3, return_attention: bool = False) -> Union[List[List[Tuple[List[int], float]]], Tuple[List[List[Tuple[List[int], float]]], torch.Tensor]]:
+        """Generate captions using beam search."""
+        batch_size = image.size(0)
+        all_captions = []
+        all_attention_weights = []
+        
+        # Extract image features
+        encoder_out = self.encode_images(image)  # (batch_size, 49, 512)
+        
+        for i in range(batch_size):
+            # Initialize caption generation
+            h, c = self.init_hidden_states(encoder_out[i:i+1])
+            
+            # First input is <start> token
+            word = torch.tensor([1]).to(image.device)  # <start> token
+            embeddings = self.embed(word)
+            
+            # Get initial attention and LSTM output
+            attention_weighted_encoding, alpha = self.attention(encoder_out[i:i+1], h)
+            gate = torch.sigmoid(self.f_beta(h))
+            attention_weighted_encoding = gate * attention_weighted_encoding
+            
+            h, c = self.decode_step(
+                torch.cat([embeddings, attention_weighted_encoding], dim=1),
+                (h, c)
+            )
+            
+            outputs = self.fc(h)
+            
+            # Initialize beam with top-k most likely first words
+            log_probs = F.log_softmax(outputs, dim=1)
+            topk_log_probs, topk_words = log_probs.topk(beam_size, 1)
+            
+            # Initialize beams: (sequence, score, hidden_state, cell_state, attention_weights)
+            beams = [(
+                [word.item()],
+                score.item(),
+                h,
+                c,
+                [alpha] if return_attention else None
+            ) for word, score in zip(topk_words[0], topk_log_probs[0])]
+            
+            # Expand beams
+            for _ in range(max_length - 1):
+                candidates = []
+                
+                # Expand each beam
+                for sequence, score, h, c, attention_weights in beams:
+                    if sequence[-1] == 2:  # if last token is <end>
+                        candidates.append((sequence, score, h, c, attention_weights))
+                        continue
+                    
+                    # Get predictions for next word
+                    word_input = torch.tensor([sequence[-1]], device=image.device)
+                    embeddings = self.embed(word_input)
+                    
+                    # Attention weighted encoding
+                    attention_weighted_encoding, alpha = self.attention(encoder_out[i:i+1], h)
+                    gate = torch.sigmoid(self.f_beta(h))
+                    attention_weighted_encoding = gate * attention_weighted_encoding
+                    
+                    # LSTM step
+                    h_new, c_new = self.decode_step(
+                        torch.cat([embeddings, attention_weighted_encoding], dim=1),
+                        (h, c)
+                    )
+                    
+                    outputs = self.fc(h_new)
+                    log_probs = F.log_softmax(outputs, dim=1)
+                    
+                    # Get top k words
+                    topk_log_probs, topk_words = log_probs.topk(beam_size, 1)
+                    
+                    # Create new candidates
+                    for word, word_score in zip(topk_words[0], topk_log_probs[0]):
+                        word_item = word.item()
+                        new_attention = attention_weights + [alpha] if return_attention else None
+                        candidates.append((
+                            sequence + [word_item],
+                            score + word_score.item(),
+                            h_new,
+                            c_new,
+                            new_attention
+                        ))
+                
+                # Select top k candidates
+                beams = sorted(candidates, key=lambda x: x[1], reverse=True)[:beam_size]
+                
+                # Early stopping if all beams end with <end>
+                if all(beam[0][-1] == 2 for beam in beams):
+                    break
+            
+            # Add final beam results for this image
+            all_captions.append([(beam[0], beam[1]) for beam in beams])
+            if return_attention:
+                # Get attention weights from the top beam
+                all_attention_weights.append(torch.stack(beams[0][4]))
+        
+        if return_attention:
+            # Pad attention weights to max length
+            max_len = max(weights.size(0) for weights in all_attention_weights)
+            padded_weights = []
+            for weights in all_attention_weights:
+                curr_len = weights.size(0)
+                if curr_len < max_len:
+                    padding = torch.zeros((max_len - curr_len,) + weights.shape[1:], device=weights.device)
+                    padded_weights.append(torch.cat([weights, padding]))
+                else:
+                    padded_weights.append(weights)
+            return all_captions, torch.stack(padded_weights)
+        return all_captions 
