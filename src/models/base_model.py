@@ -172,19 +172,40 @@ class BaseImageCaptioning(pl.LightningModule):
         outputs = self.validation_step_outputs
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
         
-        # Calculate BLEU score
-        # Pad sequences to same length
-        max_gen_len = max(len(x['generated_captions'][0]) for x in outputs)
-        generated = []
-        for x in outputs:
-            padded = x['generated_captions'][0] + [0] * (max_gen_len - len(x['generated_captions'][0]))
-            generated.append(padded)
-        generated = torch.tensor(generated)
-        targets = [x['target_captions'].tolist() for x in outputs]
-        bleu_score = corpus_bleu(targets, generated)
+        # Process generated captions and references
+        hypotheses = []  # Generated captions
+        references = []  # Ground truth captions
+        
+        for output in outputs:
+            for gen_caption in output['generated_captions']:
+                # Convert generated caption tokens to words
+                hypothesis = self.tokens_to_words(gen_caption)
+                hypotheses.append(hypothesis)
+                
+            # Process all reference captions in the batch
+            batch_references = []
+            for caption_tensor in output['target_captions']:
+                # Convert each reference caption tensor to words
+                reference = self.tokens_to_words(caption_tensor.tolist())
+                if reference:  # Only add non-empty references
+                    batch_references.append([reference])  # Wrap in list for corpus_bleu format
+            references.extend(batch_references)
+        
+        # Calculate BLEU scores
+        if hypotheses and references:  # Only calculate if we have valid captions
+            bleu1 = corpus_bleu(references, hypotheses, weights=(1.0, 0, 0, 0))
+            bleu2 = corpus_bleu(references, hypotheses, weights=(0.5, 0.5, 0, 0))
+            bleu3 = corpus_bleu(references, hypotheses, weights=(0.33, 0.33, 0.33, 0))
+            bleu4 = corpus_bleu(references, hypotheses, weights=(0.25, 0.25, 0.25, 0.25))
+        else:
+            bleu1 = bleu2 = bleu3 = bleu4 = 0.0
+            
         # Log metrics
         self.log('val_loss', avg_loss, prog_bar=True)
-        self.log('bleu_score', bleu_score, prog_bar=True)
+        self.log('bleu1', bleu1 * 100, prog_bar=True)  # Convert to percentage
+        self.log('bleu2', bleu2 * 100, prog_bar=True)
+        self.log('bleu3', bleu3 * 100, prog_bar=True)
+        self.log('bleu4', bleu4 * 100, prog_bar=True)
         
         # Clear memory
         self.validation_step_outputs.clear()
