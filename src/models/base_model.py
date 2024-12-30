@@ -16,9 +16,9 @@ class BaseImageCaptioning(pl.LightningModule):
         self.embed_size = embed_size
         self.hidden_size = hidden_size
         
-        # CNN Encoder (VGG16)
-        vgg16 = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
-        self.encoder = nn.Sequential(*list(vgg16.features.children()))
+        # CNN Encoder (VGG19)
+        vgg19 = models.vgg19(weights=models.VGG19_Weights.IMAGENET1K_V1)
+        self.encoder = nn.Sequential(*list(vgg19.features.children()))
         self.fc = nn.Linear(512 * 7 * 7, embed_size)  # 224x224 input -> 7x7 feature maps
         
         # Freeze encoder parameters

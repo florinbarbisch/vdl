@@ -43,7 +43,7 @@ class ShowAttendTell(BaseImageCaptioning):
         
         # Attention mechanism
         self.attention = Attention(
-            encoder_dim=512,  # VGG16 feature channels
+            encoder_dim=512,  # VGG19 feature channels
             decoder_dim=hidden_size,
             attention_dim=attention_dim
         )
