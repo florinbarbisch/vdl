@@ -8,12 +8,14 @@ class ShowAndTell(BaseImageCaptioning):
     def __init__(self, vocab_size: int, embed_size: int = 256, hidden_size: int = 512):
         super().__init__(vocab_size, embed_size, hidden_size)
         
-        # Replace LSTM with LSTMCell
-        self.decode_step = nn.LSTMCell(embed_size, hidden_size)
-        self.fc = nn.Linear(hidden_size, vocab_size)
+        # LSTM decoder
+        self.lstm = nn.LSTM(embed_size, hidden_size, batch_first=True)
+        self.linear = nn.Linear(hidden_size, vocab_size)
+        
+        # Add dropout for regularization
         self.dropout = nn.Dropout(0.5)
         
-        # Keep initialization layers
+        # Hidden state initialization
         self.init_h = nn.Linear(embed_size, hidden_size)
         self.init_c = nn.Linear(embed_size, hidden_size)
     
@@ -28,32 +30,28 @@ class ShowAndTell(BaseImageCaptioning):
         batch_size = images.size(0)
         
         # Extract image features
-        features = self.encode_images(images)
+        features = self.encode_images(images)  # (batch_size, embed_size)
         
-        # Initialize LSTM states
-        h, c = self.init_hidden_states(features)
+        # Initialize hidden states
+        hidden = self.init_hidden_states(features)
         
-        # Exclude last token from captions
-        decode_lengths = (captions != 0).sum(dim=1) - 1
-        max_decode_lengths = decode_lengths.max()
+        # Embed captions (exclude last token)
+        embeddings = self.embed(captions[:, :-1])  # (batch_size, seq_len-1, embed_size)
         
-        # Initialize predictions tensor
-        predictions = torch.zeros(batch_size, max_decode_lengths, self.vocab_size).to(images.device)
+        # Concatenate image features with caption embeddings
+        inputs = torch.cat((features.unsqueeze(1), embeddings), dim=1)  # (batch_size, seq_len, embed_size)
         
-        # Embed captions
-        embeddings = self.embed(captions)
+        # LSTM forward pass
+        lstm_out, _ = self.lstm(inputs, hidden)  # (batch_size, seq_len, hidden_size)
+        outputs = self.linear(self.dropout(lstm_out))  # Add dropout before linear layer
         
-        # Generate word by word
-        for t in range(max_decode_lengths):
-            h, c = self.decode_step(embeddings[:, t, :], (h, c))
-            predictions[:, t] = self.fc(self.dropout(h))
+        # Calculate cross entropy loss
+        # Reshape outputs to (batch_size * seq_len, vocab_size)
+        outputs = outputs.reshape(-1, self.vocab_size)
+        # Use targets starting from the second token (exclude <start>)
+        targets = captions.reshape(-1)
         
-        # Calculate loss
-        targets = captions[:, 1:max_decode_lengths + 1]
-        loss = nn.CrossEntropyLoss(ignore_index=0)(
-            predictions.reshape(-1, self.vocab_size),
-            targets.reshape(-1)
-        )
+        loss = nn.CrossEntropyLoss(ignore_index=0)(outputs, targets)
         
         return loss
     
