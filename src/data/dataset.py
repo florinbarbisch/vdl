@@ -7,6 +7,7 @@ import pandas as pd
 import json
 from typing import Dict, List, Tuple
 from torch.nn.utils.rnn import pad_sequence
+import numpy as np
 
 def flickr8k_collate_fn(batch):
     """Collate function to handle variable length sequences.
@@ -35,13 +36,18 @@ class Flickr8kDataset(Dataset):
                  image_dir: str,
                  captions_file: str,
                  transform=None,
-                 split: str = 'train'):
+                 split: str = 'train',
+                 eval_fold: int = None):
         """
         Args:
             image_dir (str): Directory with all the images
             captions_file (str): Path to the captions file
             transform: Optional transform to be applied on images
             split (str): train/val/test split
+            eval_fold (int): Which fold to use for evaluation (0-4). 
+                           If specified, this fold will be split into val/test,
+                           and other folds will be used for training.
+                           Also determines which fold-specific vocabulary to use.
         """
         self.image_dir = image_dir
         self.transform = transform or transforms.Compose([
@@ -54,8 +60,58 @@ class Flickr8kDataset(Dataset):
         # Load captions
         self.captions_data = pd.read_csv(captions_file)
         
-        # Filter by split
-        split_data = self.captions_data[self.captions_data['split'] == split]
+        if eval_fold is not None:
+            # Cross-validation mode
+            if eval_fold < 0 or eval_fold > 4:
+                raise ValueError("eval_fold must be between 0 and 4")
+            
+            # Load fold-specific vocabulary
+            vocab_file = os.path.join(os.path.dirname(captions_file), "vocab", f"vocab_fold{eval_fold}.json")
+            if not os.path.exists(vocab_file):
+                raise FileNotFoundError(
+                    f"Fold-specific vocabulary file not found at {vocab_file}. "
+                    "Please run prepare_dataset.py first to create the vocabularies."
+                )
+            with open(vocab_file, 'r') as f:
+                self.vocab = json.load(f)
+            
+            if split == 'train':
+                # Use all folds except eval_fold for training
+                split_data = self.captions_data[self.captions_data['fold'] != eval_fold]
+            else:
+                # Get eval fold data
+                eval_data = self.captions_data[self.captions_data['fold'] == eval_fold]
+                
+                # Get unique images in eval fold
+                eval_images = eval_data['image'].unique()
+                
+                # Split eval fold images into val (50%) and test (50%) deterministically
+                rng = np.random.RandomState(42 + eval_fold)  # Unique seed for each fold
+                eval_images = np.array(eval_images)
+                rng.shuffle(eval_images)
+                split_idx = len(eval_images) // 2
+                
+                val_images = eval_images[:split_idx]
+                test_images = eval_images[split_idx:]
+                
+                # Filter data based on split
+                if split == 'val':
+                    split_data = eval_data[eval_data['image'].isin(val_images)]
+                else:  # test
+                    split_data = eval_data[eval_data['image'].isin(test_images)]
+        else:
+            # Use original split column (for backward compatibility)
+            split_data = self.captions_data[self.captions_data['split'] == split]
+            
+            # Load full vocabulary (backward compatibility)
+            vocab_file = os.path.join(os.path.dirname(captions_file), "vocab.json")
+            if not os.path.exists(vocab_file):
+                raise FileNotFoundError(
+                    f"Vocabulary file not found at {vocab_file}. "
+                    "Please run prepare_dataset.py first to create the vocabulary."
+                )
+            with open(vocab_file, 'r') as f:
+                self.vocab = json.load(f)
         
         # Group captions by image
         grouped_data = split_data.groupby('image')
@@ -64,16 +120,6 @@ class Flickr8kDataset(Dataset):
         
         # For iteration, use first caption of each image
         self.captions = [self.image_to_captions[img][0] for img in self.image_filenames]
-        
-        # Load vocabulary
-        vocab_file = os.path.join(os.path.dirname(captions_file), "vocab.json")
-        if not os.path.exists(vocab_file):
-            raise FileNotFoundError(
-                f"Vocabulary file not found at {vocab_file}. "
-                "Please run prepare_dataset.py first to create the vocabulary."
-            )
-        with open(vocab_file, 'r') as f:
-            self.vocab = json.load(f)
         
     def _process_caption(self, caption: str) -> torch.Tensor:
         """Convert caption string to tensor of indices."""

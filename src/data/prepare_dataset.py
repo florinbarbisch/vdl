@@ -3,6 +3,7 @@ import pandas as pd
 import kaggle
 import json
 from sklearn.model_selection import train_test_split
+import numpy as np
 
 def download_dataset():
     """Download the Flickr8k dataset if not already present."""
@@ -39,7 +40,7 @@ def build_vocabulary(df: pd.DataFrame, min_freq: int = 3) -> dict:
     return vocab
 
 def prepare_captions(captions_file: str):
-    """Prepare captions.txt by adding train/val/test split."""
+    """Prepare captions.txt by adding fold assignments and creating fold-specific vocabularies."""
     print("Preparing captions file...")
     
     # Read captions
@@ -48,32 +49,54 @@ def prepare_captions(captions_file: str):
     # Get unique image names
     unique_images = df['image'].unique()
     
-    # Split images into train (80%), validation (10%), and test (10%)
-    train_images, temp_images = train_test_split(unique_images, test_size=0.2, random_state=42)
-    val_images, test_images = train_test_split(temp_images, test_size=0.5, random_state=42)
+    # Assign folds (0-4) to images using deterministic shuffle
+    rng = np.random.RandomState(42)  # Fixed seed for reproducibility
+    shuffled_images = np.array(unique_images)
+    rng.shuffle(shuffled_images)
     
-    # Create split column
-    df['split'] = 'train'  # default value
-    df.loc[df['image'].isin(val_images), 'split'] = 'val'
-    df.loc[df['image'].isin(test_images), 'split'] = 'test'
+    # Create fold assignments (0-4)
+    fold_assignments = {img: i % 5 for i, img in enumerate(shuffled_images)}
     
-    # Build vocabulary using only training captions
-    train_df = df[df['split'] == 'train']
-    vocab = build_vocabulary(train_df)
+    # Add fold column to dataframe
+    df['fold'] = df['image'].map(fold_assignments)
     
-    # Save vocabulary
-    vocab_file = os.path.join(os.path.dirname(captions_file), "vocab.json")
-    with open(vocab_file, 'w') as f:
-        json.dump(vocab, f)
-    print(f"Vocabulary saved to: {vocab_file}")
+    # Default split is train
+    df['split'] = 'train'
     
-    # Save updated captions file
+    # Create vocabularies for each fold using only training data
+    vocab_dir = os.path.join(os.path.dirname(captions_file), "vocab")
+    os.makedirs(vocab_dir, exist_ok=True)
+    
+    print("\nCreating fold-specific vocabularies:")
+    for fold in range(5):
+        # Get training data for this fold (all data except current fold)
+        train_df = df[df['fold'] != fold]
+        
+        # Build vocabulary using only training data
+        vocab = build_vocabulary(train_df)
+        
+        # Save vocabulary for this fold
+        vocab_file = os.path.join(vocab_dir, f"vocab_fold{fold}.json")
+        with open(vocab_file, 'w') as f:
+            json.dump(vocab, f)
+        print(f"Fold {fold}: Vocabulary size = {len(vocab)}")
+    
+    # Also create a full vocabulary using all data (for backward compatibility)
+    full_vocab = build_vocabulary(df)
+    full_vocab_file = os.path.join(os.path.dirname(captions_file), "vocab.json")
+    with open(full_vocab_file, 'w') as f:
+        json.dump(full_vocab, f)
+    print(f"\nFull vocabulary size (all data): {len(full_vocab)}")
+    
+    # Save updated captions file with fold assignments
     df.to_csv(captions_file, index=False)
-    print("Captions file updated with splits")
+    print("\nCaptions file updated with fold assignments")
     
-    # Print split statistics
-    print("\nDataset split statistics:")
-    print(df['split'].value_counts())
+    # Print fold statistics
+    print("\nFold statistics:")
+    fold_counts = df.groupby('fold')['image'].nunique()
+    for fold, count in fold_counts.items():
+        print(f"Fold {fold}: {count} unique images")
 
 def main():
     # Download dataset

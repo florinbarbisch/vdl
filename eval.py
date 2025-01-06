@@ -170,7 +170,8 @@ def main(args):
     test_dataset = Flickr8kDataset(
         image_dir=os.path.join(DATA_DIR, 'Images'),
         captions_file=os.path.join(DATA_DIR, 'captions.txt'),
-        split='test'
+        split='test',
+        eval_fold=args.eval_fold
     )
     
     test_loader = DataLoader(
@@ -208,11 +209,20 @@ def main(args):
     # Set vocabulary
     model.set_vocabulary(test_dataset.vocab)
     
+    # Initialize wandb run for logging if not already initialized
+    if not wandb.run:
+        run_name = f"eval_{args.model}"
+        if args.eval_fold is not None:
+            run_name += f"_fold{args.eval_fold}"
+        wandb.init(project="image-captioning-comparison", name=run_name)
+    
     # Evaluate
     metrics = evaluate(model, test_loader, device, args.beam_size)
     
     # Print results
     print("\nTest Results:")
+    if args.eval_fold is not None:
+        print(f"\nFold {args.eval_fold}:")
     print("\nGreedy Search:")
     for metric, value in metrics.items():
         if metric.startswith('greedy_'):
@@ -243,6 +253,8 @@ if __name__ == '__main__':
                         help='Attention layer dimension (for Show, Attend and Tell)')
     parser.add_argument('--beam_size', type=int, default=3,
                         help='Beam size for beam search')
+    parser.add_argument('--eval_fold', type=int, choices=[0, 1, 2, 3, 4],
+                        help='Which fold to use for evaluation in cross-validation')
     
     # Data loading arguments
     parser.add_argument('--batch_size', type=int, default=32,

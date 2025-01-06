@@ -35,6 +35,8 @@ def main(args):
         run_name = f"{args.model}_{timestamp}"
         if args.debug == "overfit":
             run_name += "_overfit"
+        if args.eval_fold is not None:
+            run_name += f"_fold{args.eval_fold}"
         wandb.init(project="image-captioning-comparison", name=run_name)
         wandb_logger = WandbLogger(name=run_name, version=run_name)
     else:
@@ -44,13 +46,15 @@ def main(args):
     train_dataset = Flickr8kDataset(
         image_dir=os.path.join(DATA_DIR, 'Images'),
         captions_file=os.path.join(DATA_DIR, 'captions.txt'),
-        split='train'
+        split='train',
+        eval_fold=args.eval_fold
     )
     
     val_dataset = Flickr8kDataset(
         image_dir=os.path.join(DATA_DIR, 'Images'),
         captions_file=os.path.join(DATA_DIR, 'captions.txt'),
-        split='val'
+        split='val',
+        eval_fold=args.eval_fold
     )
     
     train_loader = DataLoader(
@@ -108,7 +112,7 @@ def main(args):
         # Save best models based on validation loss
         checkpoint_callback = ModelCheckpoint(
             dirpath=args.checkpoint_dir,
-            filename=f'{args.model}-{{epoch:02d}}-{{val_loss:.2f}}',
+            filename=f'{args.model}-{{epoch:02d}}-{{val_loss:.2f}}' + (f'-fold{args.eval_fold}' if args.eval_fold is not None else ''),
             monitor='val_loss',
             mode='min',
             save_top_k=3,
@@ -118,7 +122,7 @@ def main(args):
         # Save last model
         last_model_callback = ModelCheckpoint(
             dirpath=args.checkpoint_dir,
-            filename=f'{args.model}-last',
+            filename=f'{args.model}-last' + (f'-fold{args.eval_fold}' if args.eval_fold is not None else ''),
             save_last=True,
             save_weights_only=True
         )
@@ -183,6 +187,8 @@ if __name__ == '__main__':
                         help='Number of data loading workers')
     parser.add_argument('--debug', type=str, choices=['overfit', 'fast'],
                         help='Debug mode: "overfit" for overfitting test, "fast" for fast_dev_run')
+    parser.add_argument('--eval_fold', type=int, choices=[0, 1, 2, 3, 4],
+                        help='Which fold to use for evaluation in cross-validation')
     
     args = parser.parse_args()
     
