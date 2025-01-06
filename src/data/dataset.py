@@ -118,8 +118,11 @@ class Flickr8kDataset(Dataset):
         self.image_filenames = list(grouped_data.groups.keys())
         self.image_to_captions = {img: group['caption'].tolist() for img, group in grouped_data}
         
-        # For iteration, use first caption of each image
-        self.captions = [self.image_to_captions[img][0] for img in self.image_filenames]
+        # Create a list of (image_filename, caption) pairs for iteration
+        self.samples = []
+        for img in self.image_filenames:
+            for caption in self.image_to_captions[img]:
+                self.samples.append((img, caption))
         
     def _process_caption(self, caption: str) -> torch.Tensor:
         """Convert caption string to tensor of indices."""
@@ -128,22 +131,25 @@ class Flickr8kDataset(Dataset):
         return torch.tensor(token_ids, dtype=torch.long)
     
     def __len__(self) -> int:
-        return len(self.image_filenames)
+        return len(self.samples)
     
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, List[str]]:
+        # Get image filename and caption for this index
+        image_filename, caption = self.samples[idx]
+        
         # Load image
-        image_path = os.path.join(self.image_dir, self.image_filenames[idx])
+        image_path = os.path.join(self.image_dir, image_filename)
         image = Image.open(image_path).convert('RGB')
         if self.transform:
             image = self.transform(image)
         
         # Get all captions for this image
-        all_captions = self.image_to_captions[self.image_filenames[idx]]
+        all_captions = self.image_to_captions[image_filename]
         
-        # Process caption (use first caption for training)
-        caption = self._process_caption(self.captions[idx])
+        # Process caption
+        caption_tensor = self._process_caption(caption)
         
-        return image, caption, all_captions
+        return image, caption_tensor, all_captions
     
     @property
     def vocab_size(self) -> int:
