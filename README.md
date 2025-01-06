@@ -35,16 +35,16 @@ This script will:
 ## Training
 Normal training:
 ```bash
-python src/train.py --model [show_tell/show_attend_tell]
+python src/train.py --model [show_tell/show_attend_tell] --eval_fold 0
 ```
 
 Debug modes:
 ```bash
 # Overfitting test (uses 1% of training data)
-python src/train.py --model [show_tell/show_attend_tell] --debug overfit
+python src/train.py --model [show_tell/show_attend_tell] --eval_fold 0 --debug overfit
 
 # Quick pipeline test (runs 1 batch through train and val)
-python src/train.py --model [show_tell/show_attend_tell] --debug fast
+python src/train.py --model [show_tell/show_attend_tell] --eval_fold 0 --debug fast
 ```
 
 The debug modes:
@@ -61,7 +61,12 @@ The debug modes:
 
 ## Evaluation
 ```bash
-python eval.py --model [show_tell/show_attend_tell] --checkpoint_path [path_to_checkpoint]
+python eval.py --model [show_tell/show_attend_tell] --eval_fold 0 --checkpoint_path [path_to_checkpoint]
+```
+
+Or from wandb:
+```bash
+python eval.py --model [show_tell/show_attend_tell] --eval_fold 0 --wandb_project [wandb_project_name] --wandb_artifact [artifact_name:version]
 ```
 
 ## Models
