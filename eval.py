@@ -143,7 +143,29 @@ def evaluate(model, data_loader, device, beam_size: int = 3):
     
     return metrics
 
+def download_model_from_wandb(artifact_path: str) -> str:
+    """Download model checkpoint from wandb artifacts.
+    
+    Args:
+        artifact_path: Path to the artifact in format 'entity/project/artifact_name:version'
+                      or just 'artifact_name:version' if already in a wandb run
+    
+    Returns:
+        Local path to the downloaded checkpoint file
+    """
+    artifact = wandb.use_artifact(artifact_path)
+    artifact_dir = artifact.download()
+    return os.path.join(artifact_dir, "model.ckpt")
+
 def main(args):
+    # Initialize wandb if using wandb artifacts
+    if args.wandb_artifact:
+        if args.wandb_project:
+            wandb.init(project=args.wandb_project)
+        checkpoint_path = download_model_from_wandb(args.wandb_artifact)
+    else:
+        checkpoint_path = args.checkpoint_path
+    
     # Data loading
     test_dataset = Flickr8kDataset(
         image_dir=os.path.join(DATA_DIR, 'Images'),
@@ -179,7 +201,7 @@ def main(args):
         )
     
     # Load checkpoint
-    checkpoint = torch.load(args.checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
     model.to(device)
     
@@ -207,8 +229,12 @@ if __name__ == '__main__':
     parser.add_argument('--model', type=str, required=True,
                         choices=['show_tell', 'show_attend_tell'],
                         help='Model architecture to use')
-    parser.add_argument('--checkpoint_path', type=str, required=True,
-                        help='Path to model checkpoint')
+    parser.add_argument('--checkpoint_path', type=str,
+                        help='Path to local model checkpoint')
+    parser.add_argument('--wandb_artifact', type=str,
+                        help='Path to wandb artifact (e.g., "model-show_tell_20240101_120000:latest")')
+    parser.add_argument('--wandb_project', type=str,
+                        help='Wandb project name (required if using wandb_artifact)')
     parser.add_argument('--embed_size', type=int, default=256,
                         help='Word embedding size')
     parser.add_argument('--hidden_size', type=int, default=512,
@@ -225,4 +251,11 @@ if __name__ == '__main__':
                         help='Number of data loading workers')
     
     args = parser.parse_args()
+    
+    # Validate arguments
+    if not args.checkpoint_path and not args.wandb_artifact:
+        parser.error("Either --checkpoint_path or --wandb_artifact must be provided")
+    if args.wandb_artifact and not args.wandb_project:
+        parser.error("--wandb_project is required when using --wandb_artifact")
+    
     main(args) 

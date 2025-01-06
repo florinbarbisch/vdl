@@ -15,6 +15,18 @@ from models.show_attend_tell import ShowAttendTell
 # Fixed data directory relative to project root
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 
+def upload_best_model_to_wandb(checkpoint_callback, run_name):
+    """Upload the best model checkpoint to wandb as an artifact."""
+    best_model_path = checkpoint_callback.best_model_path
+    if best_model_path:
+        artifact = wandb.Artifact(
+            name=f"model-{run_name}",
+            type="model",
+            description=f"Best checkpoint for {run_name}"
+        )
+        artifact.add_file(best_model_path, name="model.ckpt")
+        wandb.log_artifact(artifact)
+
 def main(args):
     # Initialize wandb (enable for overfit, disable for fast debug)
     if args.debug != "fast":
@@ -79,6 +91,17 @@ def main(args):
     # Set vocabulary for caption conversion
     model.set_vocabulary(train_dataset.vocab)
     
+    # Save vocabulary to wandb if not in debug mode
+    if args.debug != "fast":
+        vocab_artifact = wandb.Artifact(
+            name=f"vocab-{run_name}",
+            type="vocabulary",
+            description="Vocabulary for tokenization"
+        )
+        vocab_path = os.path.join(DATA_DIR, "vocab.json")
+        vocab_artifact.add_file(vocab_path)
+        wandb.log_artifact(vocab_artifact)
+    
     # Callbacks
     callbacks = []
     if not args.debug:
@@ -88,14 +111,16 @@ def main(args):
             filename=f'{args.model}-{{epoch:02d}}-{{val_loss:.2f}}',
             monitor='val_loss',
             mode='min',
-            save_top_k=3
+            save_top_k=3,
+            save_weights_only=True
         )
         
         # Save last model
         last_model_callback = ModelCheckpoint(
             dirpath=args.checkpoint_dir,
             filename=f'{args.model}-last',
-            save_last=True
+            save_last=True,
+            save_weights_only=True
         )
         callbacks.extend([checkpoint_callback, last_model_callback])
     
@@ -126,6 +151,10 @@ def main(args):
     
     # Train
     trainer.fit(model, train_loader, val_loader)
+    
+    # Upload best model to wandb if not in debug mode
+    if not args.debug:
+        upload_best_model_to_wandb(checkpoint_callback, run_name)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train image captioning models')
