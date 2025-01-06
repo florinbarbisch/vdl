@@ -30,7 +30,7 @@ python src/data/prepare_dataset.py
 ```
 This script will:
 - Download the Flickr8k dataset using kaggle
-- Add train/val/test splits to the captions file (80%/10%/10%)
+- Add 5 fold split for cross-validation
 
 ## Training
 Normal training:
