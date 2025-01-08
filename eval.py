@@ -59,9 +59,11 @@ def evaluate(model, data_loader, device, beam_size: int = 3):
                     # Create attention grids for both methods
                     attention_grids = []
                     for idx, (image, greedy_cap, beam_cap, greedy_attn, beam_attn) in enumerate(zip(
-                        images_np[:8], greedy_captions[:8], beam_captions[:8], 
-                        greedy_attention[:8], beam_attention[:8]
+                        images_np, greedy_captions, beam_captions, 
+                        greedy_attention, beam_attention
                     )):
+                        if idx % 8 != 0:  # Process only every 8th image
+                            continue
                         # Create attention grids
                         greedy_grid = model.create_attention_grid(image, greedy_cap, greedy_attn)
                         beam_grid = model.create_attention_grid(image, beam_cap, beam_attn)
