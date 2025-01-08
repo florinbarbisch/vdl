@@ -35,9 +35,6 @@ def evaluate(model, data_loader, device, beam_size: int = 3):
     all_hypotheses_greedy = []
     all_hypotheses_beam = []
     
-    # Initialize wandb for logging
-    wandb.init(project="image-captioning-comparison", name=f"eval_{model.__class__.__name__}")
-    
     with torch.no_grad():
         for batch_idx, (images, captions, original_captions) in enumerate(tqdm(data_loader, desc="Evaluating")):
             images = images.to(device)
@@ -160,10 +157,17 @@ def download_model_from_wandb(artifact_path: str) -> str:
     return os.path.join(artifact_dir, "model.ckpt")
 
 def main(args):
-    # Initialize wandb if using wandb artifacts
+    # Initialize wandb with meaningful name
+    run_name = f"eval_{args.model}"
+    if args.eval_fold is not None:
+        run_name += f"_fold{args.eval_fold}"
+    wandb.init(
+        project=args.wandb_project or "image-captioning-comparison",
+        name=run_name
+    )
+
+    # Download model from wandb if using artifacts
     if args.wandb_artifact:
-        if args.wandb_project:
-            wandb.init(project=args.wandb_project)
         checkpoint_path = download_model_from_wandb(args.wandb_artifact)
     else:
         checkpoint_path = args.checkpoint_path
@@ -210,13 +214,6 @@ def main(args):
     
     # Set vocabulary
     model.set_vocabulary(test_dataset.vocab)
-    
-    # Initialize wandb run for logging if not already initialized
-    if not wandb.run:
-        run_name = f"eval_{args.model}"
-        if args.eval_fold is not None:
-            run_name += f"_fold{args.eval_fold}"
-        wandb.init(project="image-captioning-comparison", name=run_name)
     
     # Evaluate
     metrics = evaluate(model, test_loader, device, args.beam_size)
