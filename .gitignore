@@ -186,3 +186,4 @@ wandb/
 
 # checkpoints
 checkpoints/
+*.ckpt
