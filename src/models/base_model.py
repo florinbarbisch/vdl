@@ -223,16 +223,13 @@ class BaseImageCaptioning(pl.LightningModule):
     def log_images_and_captions(self, images: torch.Tensor, generated_captions: list, original_captions: List[List[str]], 
                                attention_maps: torch.Tensor = None, max_images: int = 4, prefix: str = "val"):
         """Log images and their generated captions to wandb."""
-        if not self.logger:
-            return
-            
         # Convert images back to [0,1] range for visualization
-        images = self.inverse_transform(images)  # Take every 8th image
+        images = self.inverse_transform(images)
         images = [img.cpu().numpy().transpose(1, 2, 0) for img in images]
         
         # Create wandb Image objects with captions
         wandb_images = []
-        for idx, (image, gen_caption, orig_captions) in enumerate(zip(images, generated_captions, original_captions)):  # Take every 8th item
+        for idx, (image, gen_caption, orig_captions) in enumerate(zip(images, generated_captions, original_captions)):
             # Clip values to [0,1] range
             image = np.clip(image, 0, 1)
             
@@ -275,4 +272,4 @@ class BaseImageCaptioning(pl.LightningModule):
         # Log to wandb with prefix
         # Filter out None values from wandb_images
         wandb_images = [img for img in wandb_images if img is not None]
-        self.logger.experiment.log({f"{prefix}_samples": wandb_images}) 
+        wandb.log({f"{prefix}_samples": wandb_images}) 

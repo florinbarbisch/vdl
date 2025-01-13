@@ -102,12 +102,12 @@ def evaluate(model, data_loader, device, beam_size: int = 3):
                 if batch_idx % 8 == 0:
                     # Log greedy search results
                     model.log_images_and_captions(
-                        images[:8], greedy_captions[:8], original_captions[:8], 
+                        images[::8], greedy_captions[::8], original_captions[::8], 
                         prefix="test_greedy"
                     )
                     # Log beam search results
                     model.log_images_and_captions(
-                        images[:8], beam_captions[:8], original_captions[:8], 
+                        images[::8], beam_captions[::8], original_captions[::8], 
                         prefix="test_beam"
                     )
             
